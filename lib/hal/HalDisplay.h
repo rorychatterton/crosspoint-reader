@@ -72,6 +72,19 @@ class HalDisplay {
   uint8_t* lendFrameBufferStorage(uint32_t* sizeOut);
   void returnFrameBufferStorage();
 
+  // Free the ~48 KB framebuffer back to the general heap for a memory-hungry
+  // phase that allocates through malloc/new (e.g. the tailnet DERP+OPDS TLS
+  // handshake, which needs a large contiguous block the fragmented UI heap
+  // can't supply). Unlike lendFrameBufferStorage() (which keeps the bytes in a
+  // private build-scratch registry), this returns them to the allocator so any
+  // caller can use them. No display calls until reacquireFrameBuffer(); the
+  // panel keeps its last refreshed image.
+  void releaseFrameBuffer();
+  // Reallocate the framebuffer after releaseFrameBuffer(). Returns false if the
+  // heap can no longer supply the block (the display is then unusable). The
+  // buffer comes back white, so the caller must fully redraw.
+  bool reacquireFrameBuffer();
+
   // X3 grayscale preconditioning (OEM "AA-pre-BW(mid)" settle pass), windowed
   // to the gray region in physical panel coordinates (no-arg = full frame).
   // Call after the BW base frame is displayed and before the grayscale planes

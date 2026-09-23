@@ -1,0 +1,233 @@
+ESP-ROM:esp32c3-api1-20210207
+Build:Feb  7 2021
+rst:0x15 (USB_UART_CHIP_RESET),boot:0x9 (SPI_FAST_FLASH_BOOT)
+Saved PC:0x40384e4e
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fcd5820,len:0x1010
+load:0x403cbf10,len:0x9f4
+load:0x403ce710,len:0x2ea4
+entry 0x403cbf10
+[266] [INF] [HW] Using cached device type: X3
+[266] [XTDET] NVS hw_calib/screenType: not set
+[386] [XTDET] bus probe VER=00 00 66 00 00 FLG=13 -> UltraChip
+[387] [XTDET] MTP[0x000..0x02F]: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 66 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[387] [XTDET] promoted UC8253 -> UC8279
+[   388][E][Wire.cpp:424] beginTransmission(): could not acquire lock
+[   394][E][Wire.cpp:556] write(): NULL TX buffer pointer
+[   399][E][Wire.cpp:453] endTransmission(): NULL TX buffer pointer
+[   407][E][Wire.cpp:424] beginTransmission(): could not acquire lock
+[   413][E][Wire.cpp:556] write(): NULL TX buffer pointer
+[   419][E][Wire.cpp:453] endTransmission(): NULL TX buffer pointer
+[428] [INF] [GYR] SDK IMU initialized
+[429] [INF] [CLK] SDK RTC found[429] [INF] [MAIN] Hardware detect: X3
+[446] [SD] SD card detected
+[468] [DBG] [CPS] Settings loaded from file
+[476] [DBG] [RBS] Recent books loaded from file (1 entries)
+[483] [DBG] [KRS] Set credentials for user: rory
+[484] [DBG] [KRS] Set server URL: https://calibre.lab.wayvz.io/
+[484] [DBG] [KRS] Set match method: Filename
+[484] [DBG] [KRS] Set send metadata: false
+[484] [DBG] [KRS] Set sync behavior: Smart
+[490] [DBG] [OPS] Loaded 1 OPDS servers from file
+[496] [DBG] [TSS] Loaded tailscale config (authKey set)
+[497] [DBG] [UI] Using Lyra theme
+[497] [DBG] [MAIN] Starting CrossPoint version 1.6.0-dev-develop-b7bceb56
+[579] [DBG] [MAIN] Display initialized
+[581] [DBG] [SDREG] Fonts directory not found: /.fonts
+[583] [DBG] [SDREG] Fonts directory not found: /fonts
+[583] [DBG] [SDREG] Discovery complete: 0 families
+[584] [DBG] [SDFS] SD font system ready (0 families discovered)
+[584] [DBG] [MAIN] Fonts setup
+[584] [DBG] [ACT] Entering activity: Boot
+[587] [DBG] [GFX] Time = 3 ms from clearScreen to displayBuffer
+[676]   Wait complete:  8279_PON (40 ms)
+[1366]   Wait complete:  8279_DRF (690 ms)
+[1420] [DBG] [ACT] Exiting activity: Boot
+[1421] [DBG] [ACT] Entering activity: EpubReader
+[1426] [DBG] [EBP] Loading ePub: /Hugh Howey - The Silo Saga Omnibus.epub
+[1446] [DBG] [BMC] Loaded cache data: 303 spine, 302 TOC entries
+[1463] [DBG] [CSS] Loaded 33 rules from complete cache
+[1463] [DBG] [EBP] Loaded ePub: /Hugh Howey - The Silo Saga Omnibus.epub
+[1469] [DBG] [ERS] Loaded cache: 5, 3
+[1525] [DBG] [LOOP] New max loop duration: 107 ms (activity: 105 ms)
+[1527] [DBG] [ERS] Loading file: c02.xhtml, index: 5
+[1532] [DBG] [SCT] Deserialization succeeded: 12 pages
+[1532] [DBG] [ERS] Cache found, skipping build...
+[1578] [DBG] [FDC] Prewarm: 10 glyphs in 471 bytes from 1 groups (0 missed)
+[1596] [DBG] [FDC] Prewarm: 35 glyphs in 2121 bytes from 3 groups (0 missed)
+[2388]   Wait complete:  8279_DRF (592 ms)
+[2729]   Wait complete:  8279_gray_DRF (155 ms)
+[2783] [DBG] [ERS] Page render (tiled async): prewarm=42ms bw_render=74ms display=27ms gray_render=99ms wait=620ms gray_write=158ms gray_display=156ms cleanup=53ms total=1229ms (planes buffered: 1)
+[2786] [DBG] [ERS] Rendered page in 1231ms
+[2825] [DBG] [ERS] Progress saved: spine=5 offset=2290 page=3
+[3232] [DBG] [FDC] Prewarm: 44 glyphs in 2584 bytes from 3 groups (0 missed)
+[3233] [DBG] [ERS] Idle prewarm: page 4 in 18ms
+[4427] [DBG] [PWR] Going to low-power mode
+[6606] [DBG] [PWR] Restoring normal CPU frequency
+[6658] [DBG] [ACT] Exiting activity: EpubReader
+[6682] [DBG] [ACT] Entering activity: Home
+[6758] [DBG] [GFX] Time = 74 ms from clearScreen to displayBuffer
+[7173]   Wait complete:  8279_DRF (388 ms)
+[7218] [DBG] [GFX] Time = 17 ms from clearScreen to displayBuffer
+[7633]   Wait complete:  8279_DRF (387 ms)
+[8585] [DBG] [GFX] Time = 18 ms from clearScreen to displayBuffer
+[9000]   Wait complete:  8279_DRF (387 ms)
+[9045] [DBG] [GFX] Time = 17 ms from clearScreen to displayBuffer
+[9460]   Wait complete:  8279_DRF (387 ms)
+[9504] [DBG] [GFX] Time = 17 ms from clearScreen to displayBuffer
+[9920]   Wait complete:  8279_DRF (387 ms)
+[9965] [DBG] [GFX] Time = 18 ms from clearScreen to displayBuffer
+[10001] [INF] [MEM] Free: 122116 bytes, Total: 265384 bytes, Min Free: 64668 bytes, MaxAlloc: 98292 bytes
+[10380]   Wait complete:  8279_DRF (387 ms)
+[10426] [DBG] [GFX] Time = 18 ms from clearScreen to displayBuffer
+[10841]   Wait complete:  8279_DRF (387 ms)
+[11175] [DBG] [ACT] Exiting activity: Home
+[11175] [DBG] [ACT] Entering activity: OpdsBookBrowser
+[11181] [DBG] [ACT] Pushed to activity stack, new size = 1
+[11181] [DBG] [ACT] Entering activity: WifiSelection
+[11188] [DBG] [WCS] Loaded 3 WiFi credentials from file
+[11189] [DBG] [WIFI] Attempting saved network: Work inc Secondary
+[11360] [DBG] [LOOP] New max loop duration: 188 ms (activity: 186 ms)
+[11376] [DBG] [GFX] Time = 16 ms from clearScreen to displayBuffer
+[11793]   Wait complete:  8279_DRF (388 ms)
+[18211] [DBG] [WIFI] Saved network failed: Work inc Secondary
+[18329] [DBG] [GFX] Time = 14 ms from clearScreen to displayBuffer
+[18743]   Wait complete:  8279_DRF (387 ms)
+[20025] [INF] [MEM] Free: 65440 bytes, Total: 265384 bytes, Min Free: 62944 bytes, MaxAlloc: 59380 bytes
+[20975] [DBG] [GFX] Time = 23 ms from clearScreen to displayBuffer
+[21387]   Wait complete:  8279_DRF (387 ms)
+[23134] [DBG] [WiFi] Using saved password for Work inc Secondary, length: 15
+[23272] [DBG] [GFX] Time = 17 ms from clearScreen to displayBuffer
+[23692]   Wait complete:  8279_DRF (387 ms)
+[27667] [DBG] [WIFI] Connected BSSID: 8a:78:48:ec:58:cd, channel: 1, RSSI: -53 dBm
+[27667] [DBG] [WIFI] Connected with saved/open credentials, completing immediately
+[27668] [DBG] [ACT] Exiting activity: WifiSelection
+[27668] [DBG] [WIFI] Free heap at onExit start: 76852 bytes
+[27668] [DBG] [WIFI] Deleting WiFi scan...
+[27668] [DBG] [WIFI] Free heap after scanDelete: 76852 bytes
+[27668] [DBG] [WIFI] Free heap at onExit end: 76852 bytes
+[27668] [DBG] [ACT] Popped from activity stack, new size = 0
+[27668] [DBG] [ACT] Handling result for popped activity
+[27675] [DBG] [GFX] Time = 6 ms from clearScreen to displayBuffer
+[28088]   Wait complete:  8279_DRF (388 ms)
+[ 28165][E][NetworkManager.cpp:138] hostByName(): DNS Failed for 'calibre.lab.wayvz.io' with error '-54'
+[28174] [INF] [TSN] Wi-Fi DNS could not resolve calibre.lab.wayvz.io
+[28175] [INF] [TSN] Using cached tailnet address 100.70.198.230 for calibre.lab.wayvz.io
+[28300] [INF] [TSN] Starting tailnet session (free heap 92196)
+E (36672) ml_derp: DERP TLS heap before handshake: free=70108 largest=57332 relay=derp5e.tailscale.com region=5
+[34300] [INF] [TSN] Tailnet up after 5999 ms (free heap 76336)
+[WG_TX] Handshake init sent, result=0, sender_idx=386669410, to DERP:0
+[WG_RX] Handshake RESPONSE! receiver_idx=386669410 sender_idx=575642094
+[WG_RX] Response MAC check PASSED
+[WG_RX] Peer found for handshake, processing response
+[WG] *** HANDSHAKE COMPLETE! wg_idx=1 key=14bec4dd from=DERP:0 ***
+[WG] Session started, sending keepalive to DERP:0
+[WG] *** WIREGUARD SESSION ESTABLISHED wg_idx=1 ***
+[WG_TX] Handshake init sent, result=0, sender_idx=3061362097, to DERP:0
+[WG_RX] Handshake RESPONSE! receiver_idx=3061362097 sender_idx=1245808477
+[WG_RX] Response MAC check PASSED
+[WG_RX] Peer found for handshake, processing response
+[WG] *** HANDSHAKE COMPLETE! wg_idx=0 key=eb6fb18d from=DERP:0 ***
+[WG] Session started, sending keepalive to DERP:0
+[WG] *** WIREGUARD SESSION ESTABLISHED wg_idx=0 ***
+[35506] [DBG] [OPDS] Fetching: https://calibre.lab.wayvz.io/opds
+[35507] [DBG] [HTTP] Fetching: https://calibre.lab.wayvz.io/opds
+[35508] [DBG] [HTTP] wolfSSL GET: https://calibre.lab.wayvz.io/opds
+[SecureClient] handshake ok (auto): TLSv1.3 / TLS_AES_128_GCM_SHA256 in 543 ms
+[36433] [ERR] [TSN] Could not set DNS server
+[36433] [INF] [TSN] Tearing down tailnet session
+E (39573) microlink: STACK_HWM min-free/size bytes: coord=4652/8192 derp_tx=3528/6144 net_io=3860/6144 wg_mgr=3692/6144
+[36616] [DBG] [LOOP] New max loop duration: 8953 ms (activity: 8951 ms)
+[36638] [DBG] [GFX] Time = 21 ms from clearScreen to displayBuffer
+[36673] [INF] [MEM] Free: 71040 bytes, Total: 265384 bytes, Min Free: 17192 bytes, MaxAlloc: 24564 bytes
+[37050]   Wait complete:  8279_DRF (387 ms)
+[46675] [INF] [MEM] Free: 71032 bytes, Total: 265384 bytes, Min Free: 17192 bytes, MaxAlloc: 28660 bytes
+[56683] [INF] [MEM] Free: 71032 bytes, Total: 265384 bytes, Min Free: 17192 bytes, MaxAlloc: 28660 bytes
+[66685] [INF] [MEM] Free: 71032 bytes, Total: 265384 bytes, Min Free: 17192 bytes, MaxAlloc: 28660 bytes
+[76690] [INF] [MEM] Free: 71032 bytes, Total: 265384 bytes, Min Free: 17192 bytes, MaxAlloc: 28660 bytes
+[86697] [INF] [MEM] Free: 71032 bytes, Total: 265384 bytes, Min Free: 17192 bytes, MaxAlloc: 28660 bytes
+[96703] [INF] [MEM] Free: 70984 bytes, Total: 265384 bytes, Min Free: 17192 bytes, MaxAlloc: 28660 bytes
+[130960]   Wait complete:  8279_DRF (388 ms)
+[134030] [DBG] [OPDS] Downloading: https://calibre.lab.wayvz.io/opds/download/6/epub/ -> /Matthew Reilly - The Five Greatest Warriors_ A Novel.epub
+[134039] [DBG] [GFX] Time = 10 ms from clearScreen to displayBuffer
+[134451]   Wait complete:  8279_DRF (387 ms)
+[134485] [DBG] [GFX] Time = 9 ms from clearScreen to displayBuffer
+[134899]   Wait complete:  8279_DRF (387 ms)
+[134957][E][NetworkManager.cpp:138] hostByName(): DNS Failed for 'calibre.lab.wayvz.io' with error '-54'
+[134967] [INF] [TSN] Wi-Fi DNS could not resolve calibre.lab.wayvz.io
+[134967] [INF] [TSN] Using cached tailnet address 100.70.198.230 for calibre.lab.wayvz.io
+[134988] [INF] [TSN] Starting tailnet session (free heap 107384)
+E (143273) ml_derp: DERP TLS heap before handshake: free=78040 largest=57332 relay=derp5e.tailscale.com region=5
+[140988] [INF] [TSN] Tailnet up after 5999 ms (free heap 84720)
+[WG_TX] Handshake init sent, result=0, sender_idx=978000379, to DERP:0
+[WG_RX] Handshake RESPONSE! receiver_idx=978000379 sender_idx=2557877988
+[WG_RX] Response MAC check PASSED
+[WG_RX] Peer found for handshake, processing response
+[WG] *** HANDSHAKE COMPLETE! wg_idx=1 key=14bec4dd from=DERP:0 ***
+[WG] Session started, sending keepalive to DERP:0
+[WG] *** WIREGUARD SESSION ESTABLISHED wg_idx=1 ***
+[WG_TX] Handshake init sent, result=0, sender_idx=4079106387, to DERP:0
+[WG_RX] Handshake RESPONSE! receiver_idx=4079106387 sender_idx=1829258893
+[WG_RX] Response MAC check PASSED
+[WG_RX] Peer found for handshake, processing response
+[WG] *** HANDSHAKE COMPLETE! wg_idx=0 key=eb6fb18d from=DERP:0 ***
+[WG] Session started, sending keepalive to DERP:0
+[WG] *** WIREGUARD SESSION ESTABLISHED wg_idx=0 ***
+[142196] [DBG] [OPDS] Downloading (tailnet): https://calibre.lab.wayvz.io/opds/download/6/epub/
+[142197] [DBG] [HTTP] Downloading: https://calibre.lab.wayvz.io/opds/download/6/epub/ -> /Matthew Reilly - The Five Greatest Warriors_ A Novel.epub
+[142203] [DBG] [HTTP] wolfSSL GET: https://calibre.lab.wayvz.io/opds/download/6/epub/
+[SecureClient] handshake ok (auto): TLSv1.3 / TLS_AES_128_GCM_SHA256 in 533 ms
+[WG_RX] Handshake INITIATION from peer, sender_idx=4025398564
+[WG_RX] Initiation MAC check PASSED
+[WG_RX] Initiation processed OK, sending response
+[WG_RX] Sending response via DERP (initiation was relayed)
+[WG_PERIODIC] Handshake retry wg_idx=0 key=eb6fb18d ip=0.0.0.0:0 connect_ip=14.203.10.62:53665 active=1 send_hs=1
+[WG_TX] Handshake init sent, result=0, sender_idx=3801799757, to DERP:0
+[WG_RX] Handshake RESPONSE! receiver_idx=3801799757 sender_idx=2488574322
+[WG_RX] Response MAC check PASSED
+[WG_RX] Peer found for handshake, processing response
+[WG] *** HANDSHAKE COMPLETE! wg_idx=0 key=eb6fb18d from=DERP:0 ***
+[WG] Session started, sending keepalive to DERP:0
+[WG] *** WIREGUARD SESSION ESTABLISHED wg_idx=0 ***
+[WG_PERIODIC] Handshake retry wg_idx=0 key=eb6fb18d ip=0.0.0.0:0 connect_ip=14.203.10.62:53665 active=1 send_hs=1
+[WG_TX] Handshake init sent, result=0, sender_idx=2540255984, to DERP:0
+[WG_RX] Handshake RESPONSE! receiver_idx=2540255984 sender_idx=526550059
+[WG_RX] Response MAC check PASSED
+[WG_RX] Peer found for handshake, processing response
+[WG] *** HANDSHAKE COMPLETE! wg_idx=0 key=eb6fb18d from=DERP:0 ***
+[WG] Session started, sending keepalive to DERP:0
+[WG] *** WIREGUARD SESSION ESTABLISHED wg_idx=0 ***
+[WG_PERIODIC] Handshake retry wg_idx=1 key=14bec4dd ip=0.0.0.0:0 connect_ip=14.203.10.62:40453 active=1 send_hs=0
+[WG_TX] Handshake init sent, result=0, sender_idx=1512039194, to DERP:0
+[WG_RX] Handshake RESPONSE! receiver_idx=1512039194 sender_idx=1190614437
+[WG_RX] Response MAC check PASSED
+[WG_RX] Peer found for handshake, processing response
+[WG] *** HANDSHAKE COMPLETE! wg_idx=1 key=14bec4dd from=DERP:0 ***
+[WG] Session started, sending keepalive to DERP:0
+[WG] *** WIREGUARD SESSION ESTABLISHED wg_idx=1 ***
+[WG_PERIODIC] Handshake retry wg_idx=0 key=eb6fb18d ip=0.0.0.0:0 connect_ip=14.203.10.62:53665 active=1 send_hs=1
+[WG_TX] Handshake init sent, result=0, sender_idx=842640009, to DERP:0
+[WG_RX] Handshake RESPONSE! receiver_idx=842640009 sender_idx=1029677466
+[WG_RX] Response MAC check PASSED
+[WG_RX] Peer found for handshake, processing response
+[WG] *** HANDSHAKE COMPLETE! wg_idx=0 key=eb6fb18d from=DERP:0 ***
+[WG] Session started, sending keepalive to DERP:0
+[WG] *** WIREGUARD SESSION ESTABLISHED wg_idx=0 ***
+[WG_PERIODIC] Handshake retry wg_idx=0 key=eb6fb18d ip=0.0.0.0:0 connect_ip=14.203.10.62:53665 active=1 send_hs=1
+[WG_TX] Handshake init sent, result=0, sender_idx=1743446654, to DERP:0
+[WG_RX] Handshake RESPONSE! receiver_idx=1743446654 sender_idx=339599172
+[WG_RX] Response MAC check PASSED
+[WG_RX] Peer found for handshake, processing response
+[WG] *** HANDSHAKE COMPLETE! wg_idx=0 key=eb6fb18d from=DERP:0 ***
+[WG] Session started, sending keepalive to DERP:0
+[WG] *** WIREGUARD SESSION ESTABLISHED wg_idx=0 ***
+[436361] [DBG] [HTTP] Downloaded 8992638 bytes
+[436364] [DBG] [EPB] Cache does not exist, no action needed
+[436365] [DBG] [BookCache] Done checking metadata cache for: /Matthew Reilly - The Five Greatest Warriors_ A Novel.epub
+[436365] [INF] [TSN] Tearing down tailnet session
+E (439505) microlink: STACK_HWM min-free/size bytes: coord=4640/8192 derp_tx=3536/6144 net_io=3748/6144 wg_mgr=3604/6144
+[436522] [DBG] [EPB] Cache does not exist, no action needed
+[436522] [DBG] [BookCache] Done checking metadata cache for: /Matthew Reilly - The Five Greatest Warriors_ A Novel.epub
+[436528] [DBG] [GFX] Time = 6 ms from clearScreen to displayBuffer
+[436941]   Wait complete:  8279_DRF (388 ms)

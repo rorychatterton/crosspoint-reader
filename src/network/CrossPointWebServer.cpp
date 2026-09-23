@@ -18,6 +18,7 @@
 #include "OpdsServerStore.h"
 #include "SdCardFontSystem.h"
 #include "SettingsList.h"
+#include "TailscaleStore.h"
 #include "WebDAVHandler.h"
 #include "WifiCredentialStore.h"
 #include "html/FilesPageHtml.generated.h"
@@ -183,6 +184,10 @@ void CrossPointWebServer::begin() {
   server->on("/api/wifi", HTTP_GET, [this] { handleGetWifiNetworks(); });
   server->on("/api/wifi", HTTP_POST, [this] { handlePostWifiNetwork(); });
   server->on("/api/wifi/delete", HTTP_POST, [this] { handleDeleteWifiNetwork(); });
+
+  // Tailscale API endpoints
+  server->on("/api/tailscale", HTTP_GET, [this] { handleGetTailscale(); });
+  server->on("/api/tailscale", HTTP_POST, [this] { handlePostTailscale(); });
 
   server->onNotFound([this] { handleNotFound(); });
   LOG_DBG("WEB", "[MEM] Free heap after route setup: %d bytes", ESP.getFreeHeap());
@@ -1349,6 +1354,7 @@ void CrossPointWebServer::handleGetOpdsServers() const {
     doc["username"] = servers[i].username;
     // Never expose passwords over the API — only indicate whether one is set
     doc["hasPassword"] = !servers[i].password.empty();
+    doc["tailnet"] = servers[i].useTailnet;
 
     const size_t written = serializeJson(doc, output, outputSize);
     if (written >= outputSize) continue;
@@ -1388,17 +1394,21 @@ void CrossPointWebServer::handlePostOpdsServer() {
   bool hasPasswordField = doc["password"].is<const char*>() || doc["password"].is<std::string>();
   std::string password = doc["password"] | std::string("");
 
+  // Like the password, "tailnet" is optional: absent means "keep the current
+  // value" on update (older cached web UIs won't send it), false on create.
+  const bool hasTailnetField = doc["tailnet"].is<bool>();
+  opdsServer.useTailnet = doc["tailnet"] | false;
+
   if (doc["index"].is<int>()) {
     int idx = doc["index"].as<int>();
     if (idx < 0 || idx >= static_cast<int>(OPDS_STORE.getCount())) {
       server->send(400, "text/plain", "Invalid server index");
       return;
     }
-    // Preserve existing password if not explicitly provided
-    if (!hasPasswordField) {
-      const auto* existing = OPDS_STORE.getServer(static_cast<size_t>(idx));
-      if (existing) password = existing->password;
-    }
+    // Preserve existing password/tailnet flag if not explicitly provided
+    const auto* existing = OPDS_STORE.getServer(static_cast<size_t>(idx));
+    if (!hasPasswordField && existing) password = existing->password;
+    if (!hasTailnetField && existing) opdsServer.useTailnet = existing->useTailnet;
     opdsServer.password = password;
     OPDS_STORE.updateServer(static_cast<size_t>(idx), opdsServer);
     LOG_DBG("WEB", "Updated OPDS server at index %d", idx);
@@ -1584,6 +1594,67 @@ void CrossPointWebServer::handleDeleteWifiNetwork() {
   }
 
   LOG_DBG("WEB", "Deleted Wi-Fi network at index %d (SSID: %s)", idx, ssid->c_str());
+  server->send(200, "text/plain", "OK");
+}
+
+// ---- Tailscale API ----
+
+void CrossPointWebServer::handleGetTailscale() const {
+  JsonDocument doc;
+  // Never expose the auth key over the API; only indicate whether one is set
+  doc["hasAuthKey"] = TAILSCALE_STORE.hasAuthKey();
+  doc["deviceName"] = TAILSCALE_STORE.getDeviceName();
+  doc["controlHost"] = TAILSCALE_STORE.getControlHost();
+  doc["dnsServer"] = TAILSCALE_STORE.getDnsServer();
+
+  char output[400];
+  const size_t written = serializeJson(doc, output, sizeof(output));
+  if (written >= sizeof(output)) {
+    server->send(500, "text/plain", "Response too large");
+    return;
+  }
+  server->send(200, "application/json", output);
+}
+
+void CrossPointWebServer::handlePostTailscale() {
+  if (!server->hasArg("plain")) {
+    server->send(400, "text/plain", "Missing JSON body");
+    return;
+  }
+
+  const String body = server->arg("plain");
+  JsonDocument doc;
+  const DeserializationError err = deserializeJson(doc, body);
+  if (err) {
+    server->send(400, "text/plain", String("Invalid JSON: ") + err.c_str());
+    return;
+  }
+
+  // Every field is optional: absent means "keep the current value". Sending
+  // an explicit empty authKey clears it (disables tailnet sessions).
+  if (doc["authKey"].is<const char*>()) {
+    TAILSCALE_STORE.setAuthKey(doc["authKey"] | std::string(""));
+  }
+  if (doc["deviceName"].is<const char*>()) {
+    TAILSCALE_STORE.setDeviceName(doc["deviceName"] | std::string(""));
+  }
+  if (doc["controlHost"].is<const char*>()) {
+    TAILSCALE_STORE.setControlHost(doc["controlHost"] | std::string(""));
+  }
+  if (doc["dnsServer"].is<const char*>()) {
+    const std::string dnsServer = doc["dnsServer"] | std::string("");
+    IPAddress parsed;
+    // Must be a tailnet (100.64.0.0/10) address: the reader only reaches it
+    // through the tunnel.
+    if (!dnsServer.empty() &&
+        (!parsed.fromString(dnsServer.c_str()) || parsed[0] != 100 || (parsed[1] & 0xC0) != 0x40)) {
+      server->send(400, "text/plain", "dnsServer must be a tailnet address (100.x.y.z) or empty");
+      return;
+    }
+    TAILSCALE_STORE.setDnsServer(dnsServer);
+  }
+
+  LOG_DBG("WEB", "Updated Tailscale config (authKey %s)", TAILSCALE_STORE.hasAuthKey() ? "set" : "not set");
   server->send(200, "text/plain", "OK");
 }
 

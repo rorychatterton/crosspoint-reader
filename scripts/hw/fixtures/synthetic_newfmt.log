@@ -1,0 +1,95 @@
+ESP-ROM:esp32c3-api1-20210207
+Build:Feb  7 2021
+rst:0x15 (USB_UART_CHIP_RESET),boot:0x9 (SPI_FAST_FLASH_BOOT)
+Saved PC:0x40384e4e
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fcd5820,len:0x1010
+load:0x403cbf10,len:0x9f4
+load:0x403ce710,len:0x2ea4
+entry 0x403cbf10
+[266] [INF] [HW] Using cached device type: X3
+[446] [SD] SD card detected
+[496] [DBG] [TSS] Loaded tailscale config (authKey set)
+[497] [ERR] [SELFTEST] ========== SELFTEST begin target=100.93.9.14 ==========
+[498] [ERR] [SELFTEST] SELFTEST config fb=48000 ballast=36000 cycles=2 mode=download src=json
+[558] [ERR] [SELFTEST] SELFTEST wifi: 1 saved credentials
+[558] [ERR] [SELFTEST] SELFTEST wifi: trying Work inc Secondary
+[3878] [ERR] [SELFTEST] SELFTEST wifi: connected Work inc Secondary ip=10.100.56.10
+[3879] [ERR] [SELFTEST] SELFTEST framebuffer model=48000 (ok) free_now=101004
+[3879] [ERR] [SELFTEST] SELFTEST ballast reserve=65004 got=65004 free_now=31852 (ok)
+[3880] [ERR] [SELFTEST] SELFTEST cycle=1/2 begin free=31852 largest=24564
+[3885] [ERR] [SELFTEST] SELFTEST opds url=https://calibre.lab.wayvz.io/opds free=31800
+[3888] [ERR] [SELFTEST] SELFTEST spool open=ok free=31704
+[3888] [ERR] [SELFTEST] SELFTEST fb released free=60860 largest=24564
+[3977] [INF] [TSN] Using cached tailnet address 100.70.198.230 for calibre.lab.wayvz.io
+[3990] [ERR] [TSN] Not enough heap for tailnet session (free=60860, maxAlloc=24564)
+[3991] [ERR] [SELFTEST] SELFTEST RESULT=FAIL stage=ensureUp code=TS-E03 msg=Not enough memory for the tailnet session
+[4000] [ERR] [SELFTEST] SELFTEST cycle=2/2 begin free=79800 largest=49140
+[4005] [ERR] [SELFTEST] SELFTEST opds url=https://calibre.lab.wayvz.io/opds free=79700
+[4006] [ERR] [SELFTEST] SELFTEST spool open=ok free=79600
+[4006] [ERR] [SELFTEST] SELFTEST fb released free=80860 largest=49140
+[4100] [INF] [TSN] Using cached tailnet address 100.70.198.230 for calibre.lab.wayvz.io
+[4110] [INF] [TSN] Starting tailnet session (free heap 56328)
+E (10580) ml_derp: DERP TLS heap before handshake: free=26500 largest=23540 relay=derp5e.tailscale.com region=5
+[10487] [INF] [TSN] Tailnet up after 6376 ms (free heap 32684)
+[WG] *** WIREGUARD SESSION ESTABLISHED wg_idx=0 ***
+[11737] [ERR] [SELFTEST] SELFTEST tunnel_url=http://100.93.9.14:8080/ref9mb.bin free=32848 largest=14836
+[11739] [DBG] [HTTP] Downloading: http://100.93.9.14:8080/ref9mb.bin -> /.crosspoint/selftest_dl.bin
+[300000] [INF] [HTTP] Downloaded 9437184 bytes (content-length 9437184) in 288000 ms, 32 KB/s
+[300001] [ERR] [SELFTEST] SELFTEST fetch=OK bytes=9437184 after=288262ms free=28704 largest=13300
+[300002] [INF] [TSN] Tearing down tailnet session
+E (306000) microlink: STACK_HWM min-free/size bytes: coord=3652/6144 derp_tx=920/4096 net_io=1860/4096 wg_mgr=1692/4096
+[300150] [ERR] [SELFTEST] SELFTEST post-teardown free=79404 largest=24564
+[300151] [ERR] [SELFTEST] SELFTEST fb reclaim try=0 fail free=79404 largest=24564
+[300351] [ERR] [SELFTEST] SELFTEST fb reclaim try=1 fail free=79516 largest=24564
+[300352] [ERR] [SELFTEST] SELFTEST fb reclaim=FAIL (48000 bytes) free=79468 largest=24564
+[300353] [ERR] [SELFTEST] SELFTEST survivors=2 in region 0x3fcc0374..0x3fccbef4 (blocks up=1 fetch=0)
+[300354] [ERR] [SELFTEST] SELFTEST survivor #1 U off=24908 size=104 user=96 task=tcpip_thread |..4`...calibre.lab.wayvz.io....| ab ba 12 34 60 00 00 00 63 61 6c 69 62 72 65 2e 6c 61 62 2e 77 61 79 76 7a 2e 69 6f 00 00 00 00
+[300355] [ERR] [SELFTEST] SELFTEST survivor #2 T off=30872 size=24 user=16 task=loopTask |..4.............| ab ba 12 34 10 00 00 00 00 00 00 00 00 00 00 00
+[300360] [ERR] [SELFTEST] SELFTEST dl rep=1 result=0 bytes=9437184 expect=9437184 secs=288 kbps=32 file_md5=0123456789abcdef0123456789abcdef expect_md5=0123456789abcdef0123456789abcdef size_ok=1 file_ok=1 minfree=17176 largest=13300
+[300370] [ERR] [SELFTEST] SELFTEST spool readback=9437184 free=79516 largest=24564
+[300371] [ERR] [SELFTEST] SELFTEST RESULT=FAIL
+[300372] [ERR] [SELFTEST] SELFTEST BOOT_SUMMARY cycles=2 pass=0 fail=2 first_fail=1 deferred_stop=0
+[300373] [ERR] [SELFTEST] SELFTEST done; rebooting in 10s
+ESP-ROM:esp32c3-api1-20210207
+Build:Feb  7 2021
+rst:0xc (RTC_SW_CPU_RST),boot:0x9 (SPI_FAST_FLASH_BOOT)
+Saved PC:0x4038753e
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fcd5820,len:0x1010
+load:0x403cbf10,len:0x9f4
+load:0x403ce710,len:0x2ea4
+entry 0x403cbf10
+[272] [INF] [HW] Using cached device type: X3
+[454] [SD] SD card detected
+[497] [ERR] [SELFTEST] ========== SELFTEST begin target=100.93.9.14 ==========
+[498] [ERR] [SELFTEST] SELFTEST config fb=48000 ballast=36000 cycles=2 mode=download src=json
+[563] [ERR] [SELFTEST] SELFTEST wifi: 1 saved credentials
+[563] [ERR] [SELFTEST] SELFTEST wifi: trying Work inc Secondary
+[2888] [ERR] [SELFTEST] SELFTEST wifi: connected Work inc Secondary ip=10.100.56.10
+[2889] [ERR] [SELFTEST] SELFTEST framebuffer model=48000 (ok) free_now=100732
+[2889] [ERR] [SELFTEST] SELFTEST ballast reserve=64732 got=64732 free_now=31836 (ok)
+[2890] [ERR] [SELFTEST] SELFTEST cycle=1/2 begin free=31836 largest=24564
+[2903] [ERR] [SELFTEST] SELFTEST fb released free=80892 largest=49140
+[2973] [INF] [TSN] Using cached tailnet address 100.70.198.230 for calibre.lab.wayvz.io
+[2999] [INF] [TSN] Starting tailnet session (free heap 56548)
+Guru Meditation Error: Core  0 panic'ed (Load access fault). Exception was unhandled.
+
+Core  0 register dump:
+MEPC    : 0x4200a1c4  RA      : 0x4200a0f8  SP      : 0x3fc9e2b0  GP      : 0x3fc8f400
+TP      : 0x3fc8b3d0  T0      : 0x4005890e  T1      : 0x3fc8f000  T2      : 0x00000000
+MSTATUS : 0x00001881  MTVEC   : 0x40380001  MCAUSE  : 0x00000005  MTVAL   : 0x00000000
+MHARTID : 0x00000000
+
+Stack memory:
+3fc9e2b0: 0x00000000 0x3fc9e2f0 0x4200a0f8 0x3fcc0374 0x00000000 0x00000000 0x00000000 0x00000000
+
+ELF file SHA256: 0000000000000000
+
+Rebooting...
+ESP-ROM:esp32c3-api1-20210207
+Build:Feb  7 2021
+rst:0x3 (RTC_SW_SYS_RST),boot:0x9 (SPI_FAST_FLASH_BOOT)
+Saved PC:0x4038753e

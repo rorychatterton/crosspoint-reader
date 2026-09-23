@@ -19,6 +19,8 @@
 #include <WiFi.h>
 #include <XteinkDetect.h>
 #include <builtinFonts/all.h>
+
+#include "TailnetSelfTest.h"
 #if FREEINK_CAP_TOUCH
 #include <esp_sntp.h>
 #endif
@@ -32,8 +34,10 @@
 #include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
+#include "TailscaleStore.h"
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
+#include "activities/browser/OpdsBookBrowserActivity.h"
 #include "activities/settings/SdFirmwareUpdateActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -128,9 +132,13 @@ EpdFontFamily ui12FontFamily(&ui12RegularFont, &ui12BoldFont);
 // Definitions for SilentRestart.h. RTC_NOINIT survives ESP.restart() but not power loss.
 RTC_NOINIT_ATTR uint32_t silentRebootMagic;
 RTC_NOINIT_ATTR uint32_t silentRebootTarget;
+RTC_NOINIT_ATTR uint32_t silentRebootOpdsIndex;    // OPDS server index to resume
+RTC_NOINIT_ATTR uint32_t silentRebootOpdsAttempt;  // loop guard for heap reboots
+RTC_NOINIT_ATTR uint32_t silentRebootOpdsSession;  // OPDS feed cache session id
 constexpr uint32_t SILENT_REBOOT_MAGIC = 0xC1EAB007;
 constexpr uint32_t SILENT_REBOOT_TARGET_HOME = 0;
 constexpr uint32_t SILENT_REBOOT_TARGET_READER = 1;
+constexpr uint32_t SILENT_REBOOT_TARGET_OPDS = 2;
 
 // How the device is coming back to life, resolved once at boot. Both resume
 // flows suppress the splash and leave the panel holding its pre-boot frame; a
@@ -165,10 +173,10 @@ static bool finishWifiSessionWithoutRestart() {
 }
 #endif
 
-void silentRestart() {
+void silentRestart(bool paint) {
   if (deepSleepInProgress) return;  // sleeping supersedes the heap-defrag reboot
 #if FREEINK_CAP_TOUCH
-  if (finishWifiSessionWithoutRestart()) return;
+  if (paint && finishWifiSessionWithoutRestart()) return;
 #endif
   silentRebootTarget = SILENT_REBOOT_TARGET_HOME;
   silentRebootMagic = SILENT_REBOOT_MAGIC;
@@ -177,23 +185,54 @@ void silentRestart() {
   // Without an overlay, users don't see the reboot and fire input through to
   // Home. Select on the default selectorIndex=0 then opens the most-recent
   // book, looking like a trampoline back to the reader they just exited.
-  GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
-  delay(50);
+  if (paint) {
+    GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+    delay(50);
+  }
   ESP.restart();
 }
 
-void silentRestartToReader() {
+void silentRestartToReader(bool paint) {
   if (deepSleepInProgress) return;  // sleeping supersedes the heap-defrag reboot
 #if FREEINK_CAP_TOUCH
-  if (finishWifiSessionWithoutRestart()) return;
+  if (paint && finishWifiSessionWithoutRestart()) return;
 #endif
   silentRebootTarget = SILENT_REBOOT_TARGET_READER;
   silentRebootMagic = SILENT_REBOOT_MAGIC;
   LOG_DBG("MAIN", "Silent restart (target=reader)");
-  GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
-  delay(50);
+  if (paint) {
+    GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+    delay(50);
+  }
   ESP.restart();
 }
+
+// Reboot into a clean heap and resume the tailnet OPDS browse from the feed
+// spooled on the SD card. paint=false when the framebuffer has been released
+// to the heap: nothing can draw, and the in-place WiFi shutdown used on touch
+// boards is not an option because the display must be re-created by a boot.
+void silentRestartToOpds(uint32_t serverIndex, bool paint) {
+  if (deepSleepInProgress) return;
+#if FREEINK_CAP_TOUCH
+  if (paint && finishWifiSessionWithoutRestart()) return;
+#endif
+  silentRebootTarget = SILENT_REBOOT_TARGET_OPDS;
+  silentRebootOpdsIndex = serverIndex;
+  silentRebootOpdsAttempt = silentRebootOpdsAttempt + 1;
+  silentRebootMagic = SILENT_REBOOT_MAGIC;
+  LOG_DBG("MAIN", "Silent restart (target=opds idx=%u attempt=%u)", (unsigned)serverIndex,
+          (unsigned)silentRebootOpdsAttempt);
+  if (paint) {
+    GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+    delay(50);
+  }
+  ESP.restart();
+}
+
+uint32_t tailnetRebootAttemptCount() { return silentRebootOpdsAttempt; }
+void clearTailnetRebootAttempt() { silentRebootOpdsAttempt = 0; }
+uint32_t opdsBrowseSessionId() { return silentRebootOpdsSession; }
+void setOpdsBrowseSessionId(uint32_t id) { silentRebootOpdsSession = id; }
 
 void restartToHomeAfterStorageHandoff() {
   if (deepSleepInProgress) return;  // sleeping supersedes the storage handoff reboot
@@ -366,9 +405,12 @@ void setup() {
   // Bound the target range too — RTC_NOINIT memory is uninitialized on cold boot.
   const bool isSilentReboot = (silentRebootMagic == SILENT_REBOOT_MAGIC);
   const uint32_t snapshotTarget =
-      (isSilentReboot && silentRebootTarget <= SILENT_REBOOT_TARGET_READER) ? silentRebootTarget : 0;
+      (isSilentReboot && silentRebootTarget <= SILENT_REBOOT_TARGET_OPDS) ? silentRebootTarget : 0;
   silentRebootMagic = 0;
   silentRebootTarget = 0;
+  // The tailnet heap-reboot loop guard is reset unless this boot resumes the
+  // OPDS browse, which must keep the count so it cannot reboot again.
+  if (snapshotTarget != SILENT_REBOOT_TARGET_OPDS) silentRebootOpdsAttempt = 0;
 
   gpio.begin();
   powerManager.begin();
@@ -428,6 +470,10 @@ void setup() {
   I18N.setLanguage(static_cast<Language>(SETTINGS.language));
   KOREADER_STORE.loadFromFile();
   OPDS_STORE.loadFromFile();
+  TAILSCALE_STORE.loadFromFile();
+#ifdef CROSSPOINT_TAILNET_SELFTEST
+  runTailnetSelfTest();  // headless; never returns (reboots to retry)
+#endif
   UITheme::getInstance().reload();
   ButtonNavigator::setMappedInputManager(mappedInputManager);
 
@@ -538,6 +584,10 @@ void setup() {
   } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_READER &&
              !APP_STATE.openEpubPath.empty()) {
     activityManager.goToReader(APP_STATE.openEpubPath);
+  } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_OPDS) {
+    // Resumed after a low-heap reboot: reopen the tailnet OPDS browse with a
+    // clean heap so the concurrent DERP + HTTPS path fits.
+    activityManager.goToBrowserServer(silentRebootOpdsIndex);
   } else if (resume == BootResume::Silent) {
     // target == home (or reader with no open book): land on home — don't fall
     // through to the sleep-wake "resume reader" logic, which fires on stale
@@ -630,6 +680,20 @@ void loop() {
         uint8_t* buf = display.getFrameBuffer();
         logSerial.write(buf, bufferSize);
         logSerial.printf("SCREENSHOT_END\n");
+      } else if (cmd == "REBOOT") {
+        // Headless test driver: restart into a plain boot (no silent-resume flags).
+        logSerial.printf("REBOOT_ACK\n");
+        delay(50);
+        ESP.restart();
+      } else if (cmd.startsWith("OPDS_OPEN ")) {
+        // Headless test driver: Confirm on row N of the OPDS browser, if it is
+        // on screen and browsing (ACK:1), else ACK:0.
+        auto* browser = OpdsBookBrowserActivity::instance();
+        const int row = cmd.substring(10).toInt();
+        logSerial.printf("OPDS_OPEN_ACK:%d\n", browser && browser->injectOpenRow(row) ? 1 : 0);
+      } else if (cmd == "OPDS_BACK") {
+        auto* browser = OpdsBookBrowserActivity::instance();
+        logSerial.printf("OPDS_BACK_ACK:%d\n", browser && browser->injectBack() ? 1 : 0);
       }
     }
   }

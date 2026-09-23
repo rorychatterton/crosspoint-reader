@@ -99,6 +99,10 @@ uint8_t* HalDisplay::lendFrameBufferStorage(uint32_t* sizeOut) { return einkDisp
 
 void HalDisplay::returnFrameBufferStorage() { einkDisplay.returnBuildStorage(); }
 
+void HalDisplay::releaseFrameBuffer() { einkDisplay.releaseBuffers(); }
+
+bool HalDisplay::reacquireFrameBuffer() { return einkDisplay.reallocBuffers(); }
+
 void HalDisplay::copyGrayscaleBuffers(const uint8_t* lsbBuffer, const uint8_t* msbBuffer) {
   einkDisplay.copyGrayscaleBuffers(lsbBuffer, msbBuffer);
 }

@@ -5,8 +5,8 @@
 
 /**
  * Edit screen for a single OPDS server.
- * Shows Name, URL, Username, Password fields and a Delete option.
- * Used for both adding new servers and editing existing ones.
+ * Shows Name, URL, Username, Password and Tailscale-tunnel fields plus a
+ * Delete option. Used for both adding new servers and editing existing ones.
  */
 class OpdsSettingsActivity final : public UiListActivity {
  public:
@@ -33,11 +33,11 @@ class OpdsSettingsActivity final : public UiListActivity {
   void handleSelection();
   bool saveServer();
 
-  // Row storage: at most 5 rows (Name/URL/Username/Password + Delete, see
-  // BASE_ITEMS in the .cpp), so a fixed-capacity array avoids any heap
+  // Row storage: at most 6 rows (Name/URL/Username/Password/Tailnet + Delete,
+  // see BASE_ITEMS in the .cpp), so a fixed-capacity array avoids any heap
   // allocation for the row list. Labels are set once in the constructor
   // (they never change); buildScreen() only refreshes the value pointers,
   // which already point at editServer's own fields (no new strings built).
-  static constexpr int MAX_MENU_ITEMS = 5;
+  static constexpr int MAX_MENU_ITEMS = 6;
   freeink::ui::ListItem fieldRowItems[MAX_MENU_ITEMS]{};
 };

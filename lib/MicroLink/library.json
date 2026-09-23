@@ -1,0 +1,20 @@
+{
+  "name": "MicroLink",
+  "version": "2.0.0-crosspoint",
+  "description": "Embedded Tailscale client (DERP, DISCO, ts2021 Noise control plane, WireGuard data plane). Stripped Arduino/PlatformIO port of CamM2325/microlink for ESP32-C3.",
+  "license": "MIT",
+  "frameworks": ["arduino", "espidf"],
+  "platforms": ["espressif32"],
+  "dependencies": {
+    "WireGuardLwip": "*"
+  },
+  "build": {
+    "srcDir": "src",
+    "includeDir": "include",
+    "flags": [
+      "-DWIREGUARD_CRYPTO_REFC=1",
+      "-I../WireGuardLwip/src/crypto/refc",
+      "-Werror=frame-larger-than=2048"
+    ]
+  }
+}
