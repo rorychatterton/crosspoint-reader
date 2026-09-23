@@ -77,6 +77,13 @@
               ]))
             ];
 
+            # Runtime libraries for Espressif's prebuilt ESP32-C3 QEMU. Keep
+            # only the library outputs so entering the shell does not pull in
+            # SDL's desktop and multimedia development closure.
+            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (map pkgs.lib.getLib (with pkgs; [
+              pixman libgcrypt SDL2 zlib libslirp
+            ]));
+
             shellHook = setEnvs;
           };
         }

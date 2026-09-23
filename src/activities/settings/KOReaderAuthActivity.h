@@ -2,6 +2,7 @@
 
 #include <functional>
 
+#include "KOReaderSyncClient.h"
 #include "activities/Activity.h"
 
 /**
@@ -32,4 +33,10 @@ class KOReaderAuthActivity final : public Activity {
 
   void onWifiSelectionComplete(bool success);
   void performAuthentication();
+  // The authenticate / create-user request itself. Must not render: it runs
+  // inside the tailnet window with the framebuffer lent to the heap.
+  KOReaderSyncClient::Error authOp() const;
+  // Bring the tunnel up around authOp() (see the .cpp for the memory model).
+  // Returns false when the tunnel failed; the FAILED state is already shown.
+  bool overTailnet(KOReaderSyncClient::Error& result);
 };

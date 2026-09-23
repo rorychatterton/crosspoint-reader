@@ -60,6 +60,9 @@ class CatalogActivity : public UiListActivity {
   void launchSearch();
   void beginDownload(const std::string& title);
   void finishDownload(HttpDownloader::DownloadError result);
+  // Input pump for a blocking transfer: Back cancels; the home gesture cancels
+  // and finishDownload() then exits home.
+  void pollDownloadCancel();
   HttpDownloader::DownloadError downloadFile(const std::string& url, const std::string& dest,
                                              const std::string& user = {}, const std::string& password = {},
                                              const std::vector<HttpDownloader::Header>& headers = {});

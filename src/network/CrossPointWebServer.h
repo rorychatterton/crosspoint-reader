@@ -211,4 +211,8 @@ class CrossPointWebServer {
   // measured with them resident during a large transfer).
   void suspendTransferServices();
   void resumeTransferServices();
+
+  // Tailscale config handlers
+  void handleGetTailscale() const;
+  void handlePostTailscale();
 };

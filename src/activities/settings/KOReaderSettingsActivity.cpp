@@ -16,9 +16,9 @@ namespace fui = freeink::ui;
 
 namespace {
 const StrId menuNames[KOReaderSettingsActivity::MENU_ITEMS] = {
-    StrId::STR_USERNAME,      StrId::STR_PASSWORD,          StrId::STR_SYNC_SERVER_URL,
-    StrId::STR_SERVER_TYPE,   StrId::STR_DOCUMENT_MATCHING, StrId::STR_SEND_METADATA,
-    StrId::STR_SYNC_BEHAVIOR, StrId::STR_SIGN_UP,           StrId::STR_AUTHENTICATE};
+    StrId::STR_USERNAME,    StrId::STR_PASSWORD,          StrId::STR_SYNC_SERVER_URL, StrId::STR_SERVER_TYPE,
+    StrId::STR_USE_TAILNET, StrId::STR_DOCUMENT_MATCHING, StrId::STR_SEND_METADATA,   StrId::STR_SYNC_BEHAVIOR,
+    StrId::STR_SIGN_UP,     StrId::STR_AUTHENTICATE};
 }  // namespace
 
 KOReaderSettingsActivity::KOReaderSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
@@ -85,29 +85,33 @@ void KOReaderSettingsActivity::activateIndex(const int index) {
     KOREADER_STORE.saveToFile();
     requestUpdate();
   } else if (index == 4) {
+    KOREADER_STORE.setUseTailnet(!KOREADER_STORE.getUseTailnet());
+    KOREADER_STORE.saveToFile();
+    requestUpdate();
+  } else if (index == 5) {
     const auto current = KOREADER_STORE.getMatchMethod();
     const auto newMethod =
         (current == DocumentMatchMethod::FILENAME) ? DocumentMatchMethod::BINARY : DocumentMatchMethod::FILENAME;
     KOREADER_STORE.setMatchMethod(newMethod);
     KOREADER_STORE.saveToFile();
     requestUpdate();
-  } else if (index == 5) {
+  } else if (index == 6) {
     KOREADER_STORE.setSendMetadata(!KOREADER_STORE.getSendMetadata());
     KOREADER_STORE.saveToFile();
     requestUpdate();
-  } else if (index == 6) {
+  } else if (index == 7) {
     const auto current = KOREADER_STORE.getSyncBehavior();
     const auto newBehavior = (current == KOReaderSyncBehavior::ASK_EVERY_TIME) ? KOReaderSyncBehavior::SMART
                                                                                : KOReaderSyncBehavior::ASK_EVERY_TIME;
     KOREADER_STORE.setSyncBehavior(newBehavior);
     KOREADER_STORE.saveToFile();
     requestUpdate();
-  } else if (index == 7) {
+  } else if (index == 8) {
     if (!KOREADER_STORE.hasCredentials()) return;
     startActivityForResult(
         std::make_unique<KOReaderAuthActivity>(renderer, mappedInput, KOReaderAuthActivity::Mode::SIGN_UP),
         [](const ActivityResult&) {});
-  } else if (index == 8) {
+  } else if (index == 9) {
     if (!KOREADER_STORE.hasCredentials()) return;
     startActivityForResult(std::make_unique<KOReaderAuthActivity>(renderer, mappedInput), [](const ActivityResult&) {});
   }
@@ -143,12 +147,12 @@ void KOReaderSettingsActivity::buildScreen(UiScreen& screen) {
       rowValues_[i] = type == KOReaderServerType::CROSSPOINT ? tr(STR_CROSSPOINT)
                       : type == KOReaderServerType::KOSYNC   ? tr(STR_KOSYNC)
                                                              : tr(STR_OTHER);
-    } else if (i == 4) {
+    } else if (i == 4 || i == 6) {
+      rowValues_[i].clear();  // checkbox rows
+    } else if (i == 5) {
       rowValues_[i] =
           KOREADER_STORE.getMatchMethod() == DocumentMatchMethod::FILENAME ? tr(STR_FILENAME) : tr(STR_BINARY);
-    } else if (i == 5) {
-      rowValues_[i].clear();
-    } else if (i == 6) {
+    } else if (i == 7) {
       rowValues_[i] =
           KOREADER_STORE.getSyncBehavior() == KOReaderSyncBehavior::SMART ? tr(STR_SMART_SYNC) : tr(STR_ASK_EVERY_TIME);
     } else {
@@ -156,7 +160,8 @@ void KOReaderSettingsActivity::buildScreen(UiScreen& screen) {
     }
     rowItems_[i].value = rowValues_[i].empty() ? nullptr : rowValues_[i].c_str();
   }
-  GUI.setCheckboxRow(rowItems_[5], KOREADER_STORE.getSendMetadata());
+  GUI.setCheckboxRow(rowItems_[4], KOREADER_STORE.getUseTailnet());
+  GUI.setCheckboxRow(rowItems_[6], KOREADER_STORE.getSendMetadata());
 
   fui::ListProps props;
   props.items = rowItems_;

@@ -112,6 +112,10 @@ bool HalDisplay::displayGrayscaleBase(GrayscaleMode mode, RefreshMode fallback, 
   return einkDisplay.displayGrayscaleBase(mode, static_cast<EInkDisplay::RefreshMode>(fallback), turnOffScreen);
 }
 
+void HalDisplay::releaseFrameBuffer() { einkDisplay.releaseBuffers(); }
+
+bool HalDisplay::reacquireFrameBuffer() { return einkDisplay.reallocBuffers(); }
+
 void HalDisplay::copyGrayscaleBuffers(const uint8_t* lsbBuffer, const uint8_t* msbBuffer) {
   einkDisplay.copyGrayscaleBuffers(lsbBuffer, msbBuffer);
 }

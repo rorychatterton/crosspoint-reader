@@ -436,6 +436,18 @@ class GfxRenderer {
     bool active_ = false;
   };
 
+  // Free the 48 KB framebuffer back to the general heap for a phase that
+  // allocates through malloc/new (unlike releaseFrameBufferForBuild(), which
+  // keeps the bytes in the build-scratch registry). Gives the tailnet DERP +
+  // OPDS TLS handshake a large contiguous block. Nothing may draw between
+  // release and reacquire: hold a RenderLock so the render task cannot touch
+  // the null framebuffer. The panel keeps its last refreshed image. Counts as
+  // a loan (frameBufferLoanCount()); never call it while a build loan is out.
+  void releaseFrameBufferToHeap();
+  // Reacquire after releaseFrameBufferToHeap(); returns false if the heap can
+  // no longer supply the block. Returns the buffer white: fully redraw next.
+  bool reacquireFrameBufferFromHeap();
+
   // Low level functions
   uint8_t* getFrameBuffer() const;
   size_t getBufferSize() const;

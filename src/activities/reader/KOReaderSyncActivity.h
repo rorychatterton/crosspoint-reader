@@ -79,6 +79,18 @@ class KOReaderSyncActivity final : public Activity, private UiAppHost {
   void onWifiSelectionComplete(bool success);
   void performSync();
   void performUpload();
+  // Runs op with the tunnel up and the framebuffer lent to the heap (tailnet
+  // only; otherwise op runs directly). False = tunnel failed, status set.
+  bool overTailnet(void (KOReaderSyncActivity::*op)());
+  void fetchRemoteProgressOp();
+  void uploadProgressOp();
+  KOReaderSyncClient::Error netResult = KOReaderSyncClient::OK;
+  std::string altDocumentHash;  // smart mode: alternate matching method probe
+  // Alternate-method record fetched alongside the primary one (smart mode);
+  // compared against it once both are mapped after the Epub is reloaded.
+  KOReaderProgress alternateProgress;
+  bool hasAlternateProgress = false;
+  KOReaderProgress uploadPayload;
   bool smartSyncEnabled() const;
   void markAutoReturn();
   void completeAlreadySynced();

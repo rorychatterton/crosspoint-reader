@@ -302,6 +302,7 @@
 
   <div id="wifi-container"></div>
   <div id="opds-container"></div>
+  <div id="tailscale-container"></div>
   <div id="plugin-container"></div>
 
   <div class="card">
@@ -747,6 +748,10 @@
         '<span class="setting-name">Password</span>' +
         '<span class="setting-control"><input type="password" id="opds-pass-' + id + '" placeholder="' + (srv.hasPassword ? '(unchanged)' : '') + '"></span>' +
       '</div>' +
+      '<div class="setting-row">' +
+        '<span class="setting-name">Tailscale tunnel</span>' +
+        '<span class="setting-control"><input type="checkbox" id="opds-tailnet-' + id + '"' + (srv.tailnet ? ' checked' : '') + '></span>' +
+      '</div>' +
       '<div class="opds-actions">' +
         '<button class="btn-small btn-save-server" onclick="saveOpdsServer(' + idx + ')">Save</button>' +
         (isNew ? '' : '<button class="btn-small btn-delete" onclick="deleteOpdsServer(' + idx + ')">Delete</button>') +
@@ -798,6 +803,7 @@
       name: document.getElementById('opds-name-' + id).value,
       url: document.getElementById('opds-url-' + id).value,
       username: document.getElementById('opds-user-' + id).value,
+      tailnet: document.getElementById('opds-tailnet-' + id).checked,
     };
     // Only include password in payload when the user actually typed something;
     // omitting it tells the server to keep the existing password.
@@ -835,6 +841,64 @@
     }
   }
 
+  // Tailscale config backs the per-OPDS-server "Tailscale tunnel" option; the
+  // auth key is write-only (never echoed back, like passwords).
+  async function loadTailscale() {
+    const container = document.getElementById('tailscale-container');
+    try {
+      const resp = await fetch('/api/tailscale');
+      if (!resp.ok) throw new Error('Failed to load');
+      const cfg = await resp.json();
+      container.innerHTML = '<div class="card"><h2>Tailscale</h2>' +
+        '<div class="setting-row">' +
+          '<span class="setting-name">Auth key</span>' +
+          '<span class="setting-control"><input type="password" id="ts-authkey" placeholder="' + (cfg.hasAuthKey ? '(unchanged)' : 'tskey-auth-...') + '"></span>' +
+        '</div>' +
+        '<div class="setting-row">' +
+          '<span class="setting-name">Device name (optional)</span>' +
+          '<span class="setting-control"><input type="text" id="ts-devname" value="' + escapeHtml(cfg.deviceName || '') + '"></span>' +
+        '</div>' +
+        '<div class="setting-row">' +
+          '<span class="setting-name">Control server (optional)</span>' +
+          '<span class="setting-control"><input type="text" id="ts-ctrlhost" value="' + escapeHtml(cfg.controlHost || '') + '"></span>' +
+        '</div>' +
+        '<div class="setting-row">' +
+          '<span class="setting-name">Tailnet DNS server (optional, 100.x.y.z; resolves names only your tailnet knows)</span>' +
+          '<span class="setting-control"><input type="text" id="ts-dns" value="' + escapeHtml(cfg.dnsServer || '') + '"></span>' +
+        '</div>' +
+        '<div class="opds-actions">' +
+          '<button class="btn-small btn-save-server" onclick="saveTailscale()">Save</button>' +
+        '</div></div>';
+    } catch (e) {
+      console.error('Tailscale load error:', e);
+    }
+  }
+
+  async function saveTailscale() {
+    const data = {
+      deviceName: document.getElementById('ts-devname').value,
+      controlHost: document.getElementById('ts-ctrlhost').value,
+      dnsServer: document.getElementById('ts-dns').value.trim(),
+    };
+    // Only include the auth key when the user typed one; omitting it keeps
+    // the stored key.
+    const key = document.getElementById('ts-authkey').value;
+    if (key) data.authKey = key;
+
+    try {
+      const resp = await fetch('/api/tailscale', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      showMessage('Tailscale config saved!', false);
+      await loadTailscale();
+    } catch (e) {
+      showMessage('Error: ' + e.message, true);
+    }
+  }
+
 <!--#include file="shared/PluginHost.js.inc" -->
 
   // Sequential, not concurrent: the device's web server handles one client
@@ -844,6 +908,7 @@
     await loadSettings();
     await loadWifiNetworks();
     await loadOpdsServers();
+    await loadTailscale();
     await loadPlugins('settings');
   })();
 </script>

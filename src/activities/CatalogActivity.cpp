@@ -152,11 +152,7 @@ void CatalogActivity::beginDownload(const std::string& title) {
 void CatalogActivity::onDownloadProgress(const size_t downloaded, const size_t total) {
   downloadProgress = downloaded;
   downloadTotal = total;
-  // Home cancels immediately; other configured actions are deferred to the
-  // next main-loop pass by the transfer input pump.
-  mappedInput.update(true);
-  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) cancelDownload = true;
-  if (mappedInput.wasHomeGesture()) cancelDownload = goHomeAfterCancel = true;
+  pollDownloadCancel();
   routeTouch(mappedInput);
   const int percent = total > 0 ? static_cast<int>(static_cast<uint64_t>(downloaded) * 100 / total) : 0;
   const unsigned long now = millis();
@@ -166,6 +162,14 @@ void CatalogActivity::onDownloadProgress(const size_t downloaded, const size_t t
     lastProgressUpdateMs = now;
     requestUpdate(true);
   }
+}
+
+void CatalogActivity::pollDownloadCancel() {
+  // Home cancels immediately; other configured actions are deferred to the
+  // next main-loop pass by the transfer input pump.
+  mappedInput.update(true);
+  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) cancelDownload = true;
+  if (mappedInput.wasHomeGesture()) cancelDownload = goHomeAfterCancel = true;
 }
 
 HttpDownloader::DownloadError CatalogActivity::downloadFile(const std::string& url, const std::string& dest,

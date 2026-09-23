@@ -356,12 +356,14 @@ CrossPoint supports saving multiple OPDS servers and switching between them when
 2. Select **Add Server** to create a new entry, or select an existing server to edit it.
 
 3. Configure these fields:
-   
+
    - **Server Name**: Optional display name (for example, "Home Calibre" or "Public Catalog").
-   
+
    - **OPDS Server URL**: Full catalog root URL (for Calibre Content Server, usually ends with `/opds`).
-   
+
    - **Username / Password**: Optional credentials for authenticated servers.
+
+   - **Tailscale tunnel**: Turn on when the server lives inside your Tailscale tailnet (see below).
 
 4. Use **Delete Server** inside a server entry to remove it.
 
@@ -369,6 +371,39 @@ Behavior notes:
 
 - You can store up to 8 OPDS servers.
 - OPDS authentication supports HTTP Basic auth. If you use Calibre Content Server with authentication enabled, set it to Basic (not Digest).
+
+##### Tailscale (tailnet) servers
+
+CrossPoint can reach an OPDS server that is only accessible inside a
+[Tailscale](https://tailscale.com/) tailnet. CrossPoint starts the VPN
+session when you open a tailnet-flagged server and tears it down when you
+leave the browser, so no VPN session runs in the background.
+
+Setup:
+
+1. In the Tailscale admin console, create a **reusable** auth key, ideally
+   tag-scoped (for example `tag:ereader`), and use an ACL so the device can
+   only see your book server(s). A small visible-peer list keeps the device's
+   memory use down and speeds up connection.
+2. Enter the auth key from the web settings page (**File Transfer** mode ->
+   `http://<device-ip>/settings` -> **Tailscale** card). Device name and
+   control server are optional (leave the control server blank unless you run
+   Headscale/Ionscale). Alternatively, seed the key without the web UI by
+   writing `{"authKey":"tskey-auth-..."}` to `/.crosspoint/tailscale.json` on
+   the SD card; the reader adopts it on next boot and re-saves it obfuscated.
+3. In the OPDS server entry, set the URL to the server's tailnet address,
+   either its MagicDNS name (for example `http://books.tailnet-name.ts.net:8080/opds`)
+   or its `100.x.y.z` IP, and turn **Tailscale tunnel** on.
+
+Behavior notes:
+
+- The first connection after opening the browser takes 15 to 25 seconds while
+  the device registers with Tailscale; later fetches in the same session are
+  immediate.
+- Use `http://` URLs for tailnet servers: WireGuard already encrypts the
+  connection end-to-end, and skipping TLS saves memory on the device.
+- The auth key is stored obfuscated on the SD card; the device's node keys
+  live in internal flash.
 
 You can also manage OPDS servers from the web interface while in File Transfer mode:
 
