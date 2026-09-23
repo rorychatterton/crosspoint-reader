@@ -341,7 +341,8 @@ Response:
     "name": "My Catalog",
     "url": "http://calibre.local:8080/opds",
     "username": "reader",
-    "hasPassword": true
+    "hasPassword": true,
+    "tailnet": false
   }
 ]
 ```
@@ -350,6 +351,9 @@ Response:
 
 Adds or updates an OPDS server. Include `index` to update an existing entry.
 If `password` is omitted during an update, the existing password is preserved.
+The optional boolean `tailnet` marks the server as reachable only through the
+on-demand Tailscale tunnel; when omitted during an update, the existing value
+is preserved (defaults to `false` on create).
 
 ```bash
 curl -X POST \
@@ -414,6 +418,41 @@ curl -X POST \
   -H "Content-Type: application/json" \
   -d '{"index":0}' \
   http://crosspoint.local/api/wifi/delete
+```
+
+## Tailscale API
+
+### `GET /api/tailscale`
+
+Returns the tailnet configuration. The auth key is never returned.
+
+```bash
+curl http://crosspoint.local/api/tailscale
+```
+
+Response:
+
+```json
+{
+  "hasAuthKey": true,
+  "deviceName": "",
+  "controlHost": ""
+}
+```
+
+### `POST /api/tailscale`
+
+Updates the tailnet configuration used for OPDS servers with the `tailnet`
+flag. All fields are optional; omitted fields keep their current value.
+Sending an explicit empty `authKey` clears it. Empty `deviceName` lets the
+device auto-generate a hostname; empty `controlHost` uses the standard
+Tailscale control plane (set it for Headscale/Ionscale).
+
+```bash
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"authKey":"tskey-auth-..."}' \
+  http://crosspoint.local/api/tailscale
 ```
 
 ## WebSocket Upload

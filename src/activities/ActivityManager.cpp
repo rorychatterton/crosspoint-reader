@@ -269,6 +269,15 @@ void ActivityManager::goToLibrary() {
   replaceActivity(std::move(activity));
 }
 
+void ActivityManager::goToBrowserServer(size_t index) {
+  const auto& servers = OPDS_STORE.getServers();
+  if (index < servers.size()) {
+    replaceActivity(std::make_unique<OpdsBookBrowserActivity>(renderer, mappedInput, servers[index]));
+  } else {
+    goHome();
+  }
+}
+
 void ActivityManager::goToBrowser() {
   const auto& servers = OPDS_STORE.getServers();
   // Skip the server picker when there's only one server configured

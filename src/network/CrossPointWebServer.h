@@ -139,4 +139,8 @@ class CrossPointWebServer {
   void handleGetWifiNetworks() const;
   void handlePostWifiNetwork();
   void handleDeleteWifiNetwork();
+
+  // Tailscale config handlers
+  void handleGetTailscale() const;
+  void handlePostTailscale();
 };

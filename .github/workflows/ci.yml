@@ -196,6 +196,37 @@ jobs:
       - name: Run tests
         run: ctest --test-dir build/test --output-on-failure -j
 
+  tailnet-sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build
+
+      - name: Configure Tailnet tests with sanitizers
+        run: >-
+          cmake -S test -B build/test-tailnet-sanitize -G Ninja
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DCROSSPOINT_ENABLE_SANITIZERS=ON
+
+      - name: Build Tailnet tests
+        run: >-
+          cmake --build build/test-tailnet-sanitize
+          --target TailnetStateTest TailnetH2StreamTest TailnetMapFilterTest TailnetCryptoTest
+
+      - name: Run Tailnet tests repeatedly
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: >-
+          ctest --test-dir build/test-tailnet-sanitize --output-on-failure
+          --repeat until-fail:50 -R '^Tailnet'
+
   # This job is used as the PR required actions check, allows for changes to other steps in the future without breaking
   # PR requirements.
   test-status:
@@ -205,6 +236,7 @@ jobs:
       - clang-format
       - cppcheck
       - unit-tests
+      - tailnet-sanitizers
     if: always()
     runs-on: ubuntu-latest
     steps:

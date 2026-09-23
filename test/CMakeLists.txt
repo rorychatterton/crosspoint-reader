@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 project(crosspoint_reader_tests C CXX)
 
+option(CROSSPOINT_ENABLE_SANITIZERS "Build host tests with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -35,6 +37,16 @@ target_compile_options(crosspoint_test_common INTERFACE
   -pedantic
 )
 
+if(CROSSPOINT_ENABLE_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+  target_compile_options(crosspoint_test_common INTERFACE
+    -fsanitize=address,undefined
+    -fno-omit-frame-pointer
+  )
+  target_link_options(crosspoint_test_common INTERFACE
+    -fsanitize=address,undefined
+  )
+endif()
+
 enable_testing()
 include(GoogleTest)
 
@@ -52,6 +64,8 @@ add_subdirectory(library_builder)
 add_subdirectory(minibidi_arabic)
 add_subdirectory(combining_marks)
 add_subdirectory(credential_integrity)
+add_subdirectory(koreader_sync_decision)
+add_subdirectory(http_framing)
 add_subdirectory(xml_parser_utils)
 add_subdirectory(token_boundary)
 add_subdirectory(koreader_xpath_resolver)
@@ -72,3 +86,9 @@ add_subdirectory(absolute_grayscale)
 
 add_subdirectory(sd_card_font)
 add_subdirectory(glyph_bitmap)
+
+add_subdirectory(opds_feed_cache)
+add_subdirectory(tailnet_state)
+add_subdirectory(tailnet_h2_stream)
+add_subdirectory(tailnet_map_filter)
+add_subdirectory(tailnet_crypto)

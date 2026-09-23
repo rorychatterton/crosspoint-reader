@@ -228,6 +228,23 @@ bool GfxRenderer::restoreFrameBufferAfterBuild() {
   return frameBuffer != nullptr;
 }
 
+void GfxRenderer::releaseFrameBufferToHeap() {
+  // Actually free the block to the allocator so a malloc/new-based phase can
+  // reuse the 48 KB. The cached pointer is dropped; hasFrameBuffer() is false
+  // until reacquire. Caller must hold a RenderLock across this window.
+  display.releaseFrameBuffer();
+  frameBuffer = nullptr;
+}
+
+bool GfxRenderer::reacquireFrameBufferFromHeap() {
+  if (!display.reacquireFrameBuffer()) {
+    frameBuffer = nullptr;
+    return false;
+  }
+  frameBuffer = display.getFrameBuffer();
+  return frameBuffer != nullptr;
+}
+
 GfxRenderer::FrameBufferLoan::FrameBufferLoan(GfxRenderer& renderer) : renderer_(renderer) {
   // Nesting guard: if the framebuffer is already lent out (an outer loan),
   // stay inert so this end() cannot return storage the outer loan still owns.

@@ -415,6 +415,17 @@ class GfxRenderer {
   bool restoreFrameBufferAfterBuild();
   bool hasFrameBuffer() const { return frameBuffer != nullptr; }
 
+  // Free the 48 KB framebuffer back to the general heap for a phase that
+  // allocates through malloc/new (unlike releaseFrameBufferForBuild(), which
+  // keeps the bytes in the build-scratch registry). Gives the tailnet DERP +
+  // OPDS TLS handshake a large contiguous block. Nothing may draw between
+  // release and reacquire: hold a RenderLock so the render task cannot touch
+  // the null framebuffer. The panel keeps its last refreshed image.
+  void releaseFrameBufferToHeap();
+  // Reacquire after releaseFrameBufferToHeap(); returns false if the heap can
+  // no longer supply the block. Returns the buffer white: fully redraw next.
+  bool reacquireFrameBufferFromHeap();
+
   // RAII form of the loan above, for blocking build regions with early-return
   // error paths: restores on scope exit (or explicitly via end()). Display the
   // popup/screen the panel should hold BEFORE constructing one. Constructing

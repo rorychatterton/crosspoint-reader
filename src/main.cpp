@@ -21,6 +21,8 @@
 #include <XteinkDetect.h>
 #include <builtinFonts/all.h>
 
+#include "TailnetSelfTest.h"
+
 #include <cstring>
 
 #include "CrossPointSettings.h"
@@ -30,8 +32,10 @@
 #include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
+#include "TailscaleStore.h"
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
+#include "activities/browser/OpdsBookBrowserActivity.h"
 #include "activities/settings/SdFirmwareUpdateActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -138,11 +142,15 @@ EpdFontFamily ui12FontFamily(&ui12RegularFont, &ui12BoldFont);
 RTC_NOINIT_ATTR uint32_t silentRebootMagic;
 RTC_NOINIT_ATTR uint32_t silentRebootTarget;
 RTC_NOINIT_ATTR uint32_t silentRebootPayload;
+RTC_NOINIT_ATTR uint32_t silentRebootOpdsIndex;    // OPDS server index to resume
+RTC_NOINIT_ATTR uint32_t silentRebootOpdsAttempt;  // loop guard for heap reboots
+RTC_NOINIT_ATTR uint32_t silentRebootOpdsSession;  // OPDS feed cache session id
 constexpr uint32_t SILENT_REBOOT_MAGIC = 0xC1EAB007;
 constexpr uint32_t SILENT_REBOOT_TARGET_HOME = 0;
 constexpr uint32_t SILENT_REBOOT_TARGET_READER = 1;
 constexpr uint32_t SILENT_REBOOT_TARGET_SETTINGS = 2;
-constexpr uint32_t SILENT_REBOOT_TARGET_MAX = SILENT_REBOOT_TARGET_SETTINGS;
+constexpr uint32_t SILENT_REBOOT_TARGET_OPDS = 3;
+constexpr uint32_t SILENT_REBOOT_TARGET_MAX = SILENT_REBOOT_TARGET_OPDS;
 constexpr uint32_t SILENT_REBOOT_LIGHT_ON = 1U << 0;
 
 // How the device is coming back to life, resolved once at boot. Both resume
@@ -175,8 +183,9 @@ static void armSilentReboot(const uint32_t target) {
 }
 
 // Returns instead of rebooting when sleep supersedes the reboot; callers keep
-// running in that case.
-static void silentRestartTo(const uint32_t target, const char* targetName) {
+// running in that case. paint=false when the framebuffer has been released to
+// the heap (nothing can draw the popup).
+static void silentRestartTo(const uint32_t target, const char* targetName, const bool paint) {
   if (deepSleepInProgress) return;  // sleeping supersedes the heap-defrag reboot
   armSilentReboot(target);
   LOG_DBG("MAIN", "Silent restart (target=%s)", targetName);
@@ -185,16 +194,40 @@ static void silentRestartTo(const uint32_t target, const char* targetName) {
   // through to the new activity. On Home, Select on the default
   // selectorIndex=0 opens the most-recent book, looking like a trampoline back
   // to the reader they just exited.
-  GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
-  delay(50);
+  if (paint) {
+    GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+    delay(50);
+  }
   ESP.restart();
 }
 
-void silentRestart() { silentRestartTo(SILENT_REBOOT_TARGET_HOME, "home"); }
+void silentRestart(bool paint) { silentRestartTo(SILENT_REBOOT_TARGET_HOME, "home", paint); }
 
-void silentRestartToReader() { silentRestartTo(SILENT_REBOOT_TARGET_READER, "reader"); }
+void silentRestartToReader(bool paint) { silentRestartTo(SILENT_REBOOT_TARGET_READER, "reader", paint); }
 
-void silentRestartToSettings() { silentRestartTo(SILENT_REBOOT_TARGET_SETTINGS, "settings"); }
+void silentRestartToSettings(bool paint) { silentRestartTo(SILENT_REBOOT_TARGET_SETTINGS, "settings", paint); }
+
+// Reboot into a clean heap and resume the tailnet OPDS browse from the feed
+// spooled on the SD card. paint=false when the framebuffer has been released
+// to the heap: nothing can draw the popup.
+void silentRestartToOpds(uint32_t serverIndex, bool paint) {
+  if (deepSleepInProgress) return;  // sleeping supersedes the heap-defrag reboot
+  silentRebootOpdsIndex = serverIndex;
+  silentRebootOpdsAttempt = silentRebootOpdsAttempt + 1;
+  armSilentReboot(SILENT_REBOOT_TARGET_OPDS);
+  LOG_DBG("MAIN", "Silent restart (target=opds idx=%u attempt=%u)", (unsigned)serverIndex,
+          (unsigned)silentRebootOpdsAttempt);
+  if (paint) {
+    GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+    delay(50);
+  }
+  ESP.restart();
+}
+
+uint32_t tailnetRebootAttemptCount() { return silentRebootOpdsAttempt; }
+void clearTailnetRebootAttempt() { silentRebootOpdsAttempt = 0; }
+uint32_t opdsBrowseSessionId() { return silentRebootOpdsSession; }
+void setOpdsBrowseSessionId(uint32_t id) { silentRebootOpdsSession = id; }
 
 void restartToHomeAfterStorageHandoff() {
   if (deepSleepInProgress) return;  // sleeping supersedes the storage handoff reboot
@@ -376,6 +409,9 @@ void setup() {
   silentRebootMagic = 0;
   silentRebootTarget = 0;
   silentRebootPayload = 0;
+  // The tailnet heap-reboot loop guard is reset unless this boot resumes the
+  // OPDS browse, which must keep the count so it cannot reboot again.
+  if (snapshotTarget != SILENT_REBOOT_TARGET_OPDS) silentRebootOpdsAttempt = 0;
 
   gpio.begin();
   powerManager.begin();
@@ -438,6 +474,10 @@ void setup() {
   I18N.setLanguage(static_cast<Language>(SETTINGS.language));
   KOREADER_STORE.loadFromFile();
   OPDS_STORE.loadFromFile();
+  TAILSCALE_STORE.loadFromFile();
+#ifdef CROSSPOINT_TAILNET_SELFTEST
+  runTailnetSelfTest();  // headless; never returns (reboots to retry)
+#endif
   UITheme::getInstance().reload();
   ButtonNavigator::setMappedInputManager(mappedInputManager);
 
@@ -553,6 +593,10 @@ void setup() {
   } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_SETTINGS) {
     // Back out of the WiFi rows and the user is where they left off, not on Home.
     activityManager.goToSettings();
+  } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_OPDS) {
+    // Resumed after a low-heap reboot: reopen the tailnet OPDS browse with a
+    // clean heap so the concurrent DERP + HTTPS path fits.
+    activityManager.goToBrowserServer(silentRebootOpdsIndex);
   } else if (resume == BootResume::Silent) {
     // target == home (or reader with no open book): land on home — don't fall
     // through to the sleep-wake "resume reader" logic, which fires on stale
@@ -645,6 +689,20 @@ void loop() {
         uint8_t* buf = display.getFrameBuffer();
         logSerial.write(buf, bufferSize);
         logSerial.printf("SCREENSHOT_END\n");
+      } else if (cmd == "REBOOT") {
+        // Headless test driver: restart into a plain boot (no silent-resume flags).
+        logSerial.printf("REBOOT_ACK\n");
+        delay(50);
+        ESP.restart();
+      } else if (cmd.startsWith("OPDS_OPEN ")) {
+        // Headless test driver: Confirm on row N of the OPDS browser, if it is
+        // on screen and browsing (ACK:1), else ACK:0.
+        auto* browser = OpdsBookBrowserActivity::instance();
+        const int row = cmd.substring(10).toInt();
+        logSerial.printf("OPDS_OPEN_ACK:%d\n", browser && browser->injectOpenRow(row) ? 1 : 0);
+      } else if (cmd == "OPDS_BACK") {
+        auto* browser = OpdsBookBrowserActivity::instance();
+        logSerial.printf("OPDS_BACK_ACK:%d\n", browser && browser->injectBack() ? 1 : 0);
       }
     }
   }

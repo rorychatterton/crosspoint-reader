@@ -8,12 +8,17 @@
 #include <I18n.h>
 #include <LibraryBuilder.h>
 #include <Logging.h>
+#include <OpdsFeedCacheStore.h>
 #include <OpdsStream.h>
 #include <WiFi.h>
+#include <esp_system.h>
+
+#include <ctime>
 
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
+#include "activities/RenderLock.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UIScale.h"
@@ -21,6 +26,7 @@
 #include "components/icons/search32.h"
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
+#include "network/TailnetSession.h"
 #include "util/BookCacheUtils.h"
 #include "util/OpdsFilename.h"
 #include "util/StringUtils.h"
@@ -35,7 +41,14 @@ constexpr fui::ActionId ACTION_CANCEL = 3;
 constexpr int DOWNLOAD_PROGRESS_STEP_PERCENT = 5;
 constexpr unsigned long DOWNLOAD_PROGRESS_MIN_UPDATE_MS = 5000;
 
+// Tailnet feed spool and the resume sidecar that carries the browse state
+// (fetch result, current path, history) across a reboot into the browser.
+constexpr char OPDS_FEED_SPOOL[] = "/.crosspoint/opds_feed.xml";
+constexpr char OPDS_RESUME_FILE[] = "/.crosspoint/opds_resume.txt";
+
 }  // namespace
+
+OpdsBookBrowserActivity* OpdsBookBrowserActivity::activeInstance = nullptr;
 
 OpdsBookBrowserActivity::OpdsBookBrowserActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                                  OpdsServer server)
@@ -44,8 +57,29 @@ OpdsBookBrowserActivity::OpdsBookBrowserActivity(GfxRenderer& renderer, MappedIn
       buttonNavigator(),
       server(std::move(server)) {}
 
+bool OpdsBookBrowserActivity::injectOpenRow(const int row) {
+  if (state != BrowserState::BROWSING) return false;
+  if (row < 0 || row >= static_cast<int>(entries.size())) return false;
+  selectorIndex = row;
+  activateSelected();
+  return true;
+}
+
+bool OpdsBookBrowserActivity::injectBack() {
+  if (state != BrowserState::BROWSING) return false;
+  navigateBack();
+  return true;
+}
+
 void OpdsBookBrowserActivity::onEnter() {
   Activity::onEnter();
+  activeInstance = this;
+
+  // A fresh session id marks every page fetched from this entry as
+  // same-session for the cache; a boot resumed via the sidecar keeps the id
+  // it rebooted with (RTC_NOINIT) so pages spooled before the reboot still hit.
+  if (!Storage.exists(OPDS_RESUME_FILE)) setOpdsBrowseSessionId(millis() ^ esp_random());
+  OpdsFeedCacheStore::sweepOrphans();
 
   state = BrowserState::CHECK_WIFI;
   entries.clear();
@@ -64,13 +98,23 @@ void OpdsBookBrowserActivity::onEnter() {
   app.setScreen(&OpdsBookBrowserActivity::rootScreen, this);
   requestUpdate();
 
+  // Booted from rebootIntoBrowse(): render the spooled feed; WiFi (and the
+  // tunnel) are only brought up again on the next navigation.
+  if (resumeFromSpool()) return;
   checkAndConnectWifi();
 }
 
 void OpdsBookBrowserActivity::onExit() {
+  activeInstance = nullptr;
   Activity::onExit();
   entries.clear();
   navigationHistory.clear();
+
+  // Stop the WG netif before dropping WiFi; the silent reboot below then
+  // clears any remaining tunnel state (see TailnetSession lifetime model).
+  if (TAILNET.wasActive()) {
+    TAILNET.teardown();
+  }
 
   if (WiFi.getMode() != WIFI_MODE_NULL) {
     WiFi.disconnect(false);
@@ -317,11 +361,14 @@ void OpdsBookBrowserActivity::buildStatusScreen(UiScreen& screen) {
     const int16_t lh = screen.target().lineHeight(centered.font);
     const int16_t gap = screen.theme().spaceMd;
     const bool showTapHint = mappedInput.hasTouch();
-    const int16_t blockH = static_cast<int16_t>(lh * (showTapHint ? 3 : 2) + gap * (showTapHint ? 2 : 1));
+    centered.maxLines = 4;
+    const int16_t errorH =
+        fui::measureWrappedText(screen.target(), errorMessage.c_str(), centered, screen.body().width).height;
+    const int16_t blockH = static_cast<int16_t>(lh * (showTapHint ? 2 : 1) + errorH + gap * (showTapHint ? 2 : 1));
     const fui::Rect body = screen.body();
     if (body.height > blockH) screen.spacer(static_cast<int16_t>((body.height - blockH) / 2));
     screen.target().text(screen.takeTop(lh, gap), tr(STR_ERROR_MSG), centered);
-    screen.target().text(screen.takeTop(lh, gap), errorMessage.c_str(), centered);
+    screen.target().text(screen.takeTop(errorH, gap), errorMessage.c_str(), centered);
     if (showTapHint) screen.target().text(screen.takeTop(lh), tr(STR_TAP_TO_RETRY), centered);
     return;
   }
@@ -335,6 +382,7 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
   MappedInputManager::Labels labels;
   switch (state) {
     case BrowserState::BROWSING: {
+      LOG_DBG("OPDS", "Rendered browse: rows=%u selected=%d", static_cast<unsigned>(rowItems.size()), selectorIndex);
       const char* confirmLabel =
           (!entries.empty() && entries[selectorIndex].type == OpdsEntryType::BOOK) ? tr(STR_DOWNLOAD) : tr(STR_OPEN);
       const char* searchLabel = (!searchTemplate.empty() && selectorIndex == 0) ? tr(STR_SEARCH) : tr(STR_DIR_UP);
@@ -366,9 +414,91 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
   }
 
   std::string url = UrlUtils::buildUrl(server.url, path);
-  LOG_DBG("OPDS", "Fetching: %s", url.c_str());
+
   OpdsParser parser;
-  {
+  if (server.useTailnet) {
+    // DERP TLS plus the OPDS HTTPS session need a contiguous block the
+    // fragmented UI heap cannot supply, so the 48 KB framebuffer is freed to
+    // the heap for the fetch under a RenderLock (the panel keeps the painted
+    // status frame). ~35 KB free with the framebuffer held leaves no room for
+    // a RAM body, and anything left in the freed region would split the 48 KB
+    // block, so the feed is spooled to SD and parsed after the reclaim. The
+    // tunnel and framebuffer together exceed the heap, so the tunnel is torn
+    // down before the reclaim and re-established per fetch (the cached DNS
+    // answer keeps later bring-ups single-phase). Network-stack leftovers
+    // (TIME_WAIT sockets, a timed-out stop) can still split the region; then
+    // only a reboot restores the display, and rebootIntoBrowse() carries the
+    // spool and browse state across it.
+    state = BrowserState::LOADING;
+    statusMessage = TAILNET.isUp() ? tr(STR_LOADING) : tr(STR_TAILNET_CONNECTING);
+    requestUpdateAndWait();  // paint the status while the framebuffer still exists
+
+    // Opened before the release so its bookkeeping sits outside the region.
+    HalFile spool;
+    if (!Storage.openFileForWrite("OPDS", OPDS_FEED_SPOOL, spool)) {
+      state = BrowserState::ERROR;
+      errorMessage = tr(STR_FETCH_FEED_FAILED);
+      requestUpdate();
+      return;
+    }
+
+    // Set the target before the release: the session keeps the host string
+    // past teardown, and it must not sit inside the framebuffer's region.
+    if (!TAILNET.isUp()) TAILNET.setTargetUrl(url);
+
+    bool ok = false;
+    size_t spooled = 0;
+    {
+      RenderLock lock;
+      renderer.releaseFrameBufferToHeap();
+      if (prepareTailnetUrl(url)) {  // ensureUp + rewrite (sets errorMessage on fail)
+        LOG_DBG("OPDS", "Fetching: %s", url.c_str());
+        ok = HttpDownloader::fetchUrl(
+            url,
+            [&spool, &spooled](const uint8_t* data, size_t len) {
+              spooled += len;
+              return spool.write(data, len) == len;
+            },
+            server.username, server.password);
+        if (!ok) {
+          state = BrowserState::ERROR;
+          errorMessage = tr(STR_FETCH_FEED_FAILED);
+        }
+      } else if (tailnetRebootAttemptCount() == 0) {
+        // Bring-up refused, typically because earlier fetch cycles left the
+        // heap too fragmented for the tunnel. Retry once from a fresh boot;
+        // a second refusal on a clean heap is reported as the error it is.
+        spool.close();
+        TAILNET.teardown();
+        rebootIntoBrowse(ResumeMode::FETCH_PENDING);
+      }
+      spool.close();       // closed before reopen/remove below
+      TAILNET.teardown();  // drop the tunnel before reclaiming the framebuffer
+      // Still under the RenderLock: nothing may try to draw a null framebuffer.
+      if (!renderer.reacquireFrameBufferFromHeap()) {
+        rebootIntoBrowse(ok ? ResumeMode::SPOOLED : ResumeMode::FETCH_FAILED);
+      }
+    }  // RenderLock released
+    if (!ok) {
+      Storage.remove(OPDS_FEED_SPOOL);
+      requestUpdate();
+      return;
+    }
+    // Framebuffer restored and tunnel down: file the page in the cache (keyed
+    // by the pre-rewrite URL) and parse it from there.
+    char cachePath[opds_feed_cache::PATH_CAP];
+    const bool cached = fileSpoolInCache(UrlUtils::buildUrl(server.url, path), static_cast<uint32_t>(spooled),
+                                         cachePath, sizeof(cachePath));
+    const bool parsed = parseSpool(parser, cached ? cachePath : OPDS_FEED_SPOOL);
+    if (!cached) Storage.remove(OPDS_FEED_SPOOL);
+    if (!parsed) {
+      state = BrowserState::ERROR;
+      errorMessage = tr(STR_FETCH_FEED_FAILED);
+      requestUpdate();
+      return;
+    }
+  } else {
+    LOG_DBG("OPDS", "Fetching: %s", url.c_str());
     OpdsParserStream stream{parser};
     if (!HttpDownloader::fetchUrl(url, stream, server.username, server.password)) {
       state = BrowserState::ERROR;
@@ -378,6 +508,152 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
     }
   }
 
+  applyParsedFeed(std::move(parser));
+}
+
+// Feeds the spooled/cached page at `path` through the parser. The file is
+// left in place (cache pages are reused; a plain spool is removed by the
+// caller). Returns false only when the file cannot be opened.
+bool OpdsBookBrowserActivity::parseSpool(OpdsParser& parser, const char* path) {
+  HalFile spool;
+  if (!Storage.openFileForRead("OPDS", path, spool)) return false;
+  uint8_t chunk[256];
+  int n;
+  while ((n = spool.read(chunk, sizeof(chunk))) > 0) parser.write(chunk, static_cast<size_t>(n));
+  parser.flush();
+  return true;
+}
+
+bool OpdsBookBrowserActivity::fileSpoolInCache(const std::string& feedUrl, const uint32_t bytes, char* cachePath,
+                                               const size_t cap) {
+  opds_feed_cache::Entry entry;
+  entry.hash = opds_feed_cache::feedKey(feedUrl, server.username);
+  entry.bytes = bytes;
+  entry.fetchedAt = opds_feed_cache::normaliseNow(static_cast<int64_t>(time(nullptr)));
+  entry.sessionId = opdsBrowseSessionId();
+  opds_feed_cache::formatPath(cachePath, cap, entry.hash);
+  if (!OpdsFeedCacheStore::commit(OPDS_FEED_SPOOL, entry, feedUrl)) return false;
+  LOG_INF("OPDS", "Feed cached path=%s bytes=%u", currentPath.c_str(), static_cast<unsigned>(bytes));
+  return true;
+}
+
+bool OpdsBookBrowserActivity::serveFromCache() {
+  const uint64_t key = opds_feed_cache::feedKey(UrlUtils::buildUrl(server.url, currentPath), server.username);
+  const uint32_t now = opds_feed_cache::normaliseNow(static_cast<int64_t>(time(nullptr)));
+  opds_feed_cache::Entry entry;
+  if (!OpdsFeedCacheStore::lookup(key, now, opdsBrowseSessionId(), entry)) return false;
+  char cachePath[opds_feed_cache::PATH_CAP];
+  opds_feed_cache::formatPath(cachePath, sizeof(cachePath), key);
+  if (!Storage.exists(cachePath)) return false;  // indexed but swept/missing: fetch instead
+  OpdsParser parser;
+  if (!parseSpool(parser, cachePath)) return false;
+  LOG_INF("OPDS", "Feed served from cache path=%s bytes=%u age_s=%u", currentPath.c_str(),
+          static_cast<unsigned>(entry.bytes), static_cast<unsigned>(opds_feed_cache::ageSeconds(entry, now)));
+  applyParsedFeed(std::move(parser));
+  return true;
+}
+
+bool OpdsBookBrowserActivity::writeResumeSidecar(const ResumeMode mode, const std::string& path,
+                                                 const std::vector<std::string>& history) {
+  HalFile f;
+  if (!Storage.openFileForWrite("OPDS", OPDS_RESUME_FILE, f)) return false;
+  const char modeLine[3] = {static_cast<char>('0' + static_cast<uint8_t>(mode)), '\n', 0};
+  f.write(modeLine, 2);
+  f.write(path.data(), path.size());
+  f.write("\n", 1);
+  for (const auto& p : history) {
+    f.write(p.data(), p.size());
+    f.write("\n", 1);
+  }
+  return f.close();
+}
+
+void OpdsBookBrowserActivity::rebootIntoBrowse(const ResumeMode mode) {
+  if (!writeResumeSidecar(mode, currentPath, navigationHistory)) {
+    LOG_ERR("OPDS", "Resume sidecar write failed; the resumed boot will start at the root feed");
+  }
+  uint32_t index = 0;
+  const auto& servers = OPDS_STORE.getServers();
+  for (size_t i = 0; i < servers.size(); i++) {
+    if (servers[i].url == server.url && servers[i].name == server.name) {
+      index = static_cast<uint32_t>(i);
+      break;
+    }
+  }
+  LOG_ERR("OPDS", "Rebooting into the browse (mode=%u)", static_cast<unsigned>(mode));
+  silentRestartToOpds(index, /*paint=*/false);
+  for (;;) delay(1000);  // ESP.restart() does not return
+}
+
+bool OpdsBookBrowserActivity::resumeFromSpool() {
+  if (!Storage.exists(OPDS_RESUME_FILE)) {
+    if (Storage.exists(OPDS_FEED_SPOOL)) Storage.remove(OPDS_FEED_SPOOL);  // stale
+    return false;
+  }
+  const String sidecar = Storage.readFile(OPDS_RESUME_FILE);
+  Storage.remove(OPDS_RESUME_FILE);
+  ResumeMode mode = ResumeMode::FETCH_FAILED;
+  bool first = true;
+  bool havePath = false;
+  size_t start = 0;
+  while (start < static_cast<size_t>(sidecar.length())) {
+    int end = sidecar.indexOf('\n', static_cast<unsigned>(start));
+    if (end < 0) end = sidecar.length();
+    const std::string line(sidecar.c_str() + start, static_cast<size_t>(end) - start);
+    start = static_cast<size_t>(end) + 1;
+    if (first) {
+      if (line == "1") mode = ResumeMode::SPOOLED;
+      if (line == "2") mode = ResumeMode::FETCH_PENDING;
+      first = false;
+    } else if (!havePath) {
+      currentPath = line;
+      havePath = true;
+    } else {
+      navigationHistory.push_back(line);
+    }
+  }
+  LOG_INF("OPDS", "Resume from spool: mode=%u path=%s history=%u", static_cast<unsigned>(mode), currentPath.c_str(),
+          static_cast<unsigned>(navigationHistory.size()));
+  switch (mode) {
+    case ResumeMode::SPOOLED: {
+      // File the spool in the cache first so later back navigation to this
+      // page is served from the card, then parse it from there.
+      uint32_t bytes = 0;
+      {
+        HalFile spool;
+        if (Storage.openFileForRead("OPDS", OPDS_FEED_SPOOL, spool)) bytes = static_cast<uint32_t>(spool.fileSize());
+      }
+      char cachePath[opds_feed_cache::PATH_CAP];
+      const bool cached =
+          fileSpoolInCache(UrlUtils::buildUrl(server.url, currentPath), bytes, cachePath, sizeof(cachePath));
+      OpdsParser parser;
+      const bool parsed = parseSpool(parser, cached ? cachePath : OPDS_FEED_SPOOL);
+      if (!cached) Storage.remove(OPDS_FEED_SPOOL);
+      if (parsed) {
+        applyParsedFeed(std::move(parser));
+      } else {
+        state = BrowserState::ERROR;
+        errorMessage = tr(STR_FETCH_FEED_FAILED);
+        requestUpdate();
+      }
+      return true;
+    }
+    case ResumeMode::FETCH_PENDING:
+      if (Storage.exists(OPDS_FEED_SPOOL)) Storage.remove(OPDS_FEED_SPOOL);
+      if (serveFromCache()) return true;  // no WiFi detour for a page already on the card
+      checkAndConnectWifi();              // fetches currentPath on this fresh heap
+      return true;
+    case ResumeMode::FETCH_FAILED:
+    default:
+      if (Storage.exists(OPDS_FEED_SPOOL)) Storage.remove(OPDS_FEED_SPOOL);
+      state = BrowserState::ERROR;
+      errorMessage = tr(STR_FETCH_FEED_FAILED);
+      requestUpdate();
+      return true;
+  }
+}
+
+void OpdsBookBrowserActivity::applyParsedFeed(OpdsParser&& parser) {
   if (!parser) {
     state = BrowserState::ERROR;
     errorMessage = tr(STR_PARSE_FEED_FAILED);
@@ -410,7 +686,11 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
   state = entries.empty() ? BrowserState::ERROR : BrowserState::BROWSING;
   if (entries.empty()) errorMessage = tr(STR_NO_ENTRIES);
   rebuildRowItems();
+  LOG_INF("OPDS", "Feed applied: entries=%u truncated=%d", static_cast<unsigned>(entries.size()),
+          feedTruncated ? 1 : 0);
   requestUpdate();
+  // A feed landed: the next tunnel refusal may again retry via a fresh boot.
+  clearTailnetRebootAttempt();
 }
 
 // Derives rowItems from entries. Called whenever entries changes
@@ -443,12 +723,13 @@ void OpdsBookBrowserActivity::navigateToEntry(const OpdsEntry& entry) {
   const std::string feedUrl = UrlUtils::buildUrl(server.url, currentPath);
   currentPath = UrlUtils::buildUrl(feedUrl, entry.href);
 
-  state = BrowserState::LOADING;
-  statusMessage = tr(STR_LOADING);
   releaseEntries();
   selectorIndex = 0;
+  if (serveFromCache()) return;  // before any WiFi/tunnel work, and without a Loading repaint
+  state = BrowserState::LOADING;
+  statusMessage = tr(STR_LOADING);
   requestUpdate(true);
-  fetchFeed(currentPath);
+  checkAndConnectWifi();  // reconnects first after a resumed boot, then fetches currentPath
 }
 
 void OpdsBookBrowserActivity::navigateBack() {
@@ -457,12 +738,13 @@ void OpdsBookBrowserActivity::navigateBack() {
   } else {
     currentPath = navigationHistory.back();
     navigationHistory.pop_back();
-    state = BrowserState::LOADING;
-    statusMessage = tr(STR_LOADING);
     releaseEntries();
     selectorIndex = 0;
+    if (serveFromCache()) return;
+    state = BrowserState::LOADING;
+    statusMessage = tr(STR_LOADING);
     requestUpdate();
-    fetchFeed(currentPath);
+    checkAndConnectWifi();
   }
 }
 
@@ -477,6 +759,7 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
   // Build full download URL relative to the current feed, not the root server URL
   const std::string feedUrl = UrlUtils::buildUrl(server.url, currentPath);
   std::string downloadUrl = UrlUtils::buildUrl(feedUrl, book.href);
+  // (Tailnet URLs are rewritten below, once the framebuffer has been released.)
   // opdsDownloadFolder is already a null-terminated char[64]; use it directly —
   // no std::string copy. exists()/mkdir() take const char*.
   const char* folder = SETTINGS.opdsDownloadFolder;  // "" => SD root
@@ -511,49 +794,103 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
   if (auto* fcm = renderer.getFontCacheManager()) {
     fcm->releaseSdFontCaches();
   }
-  LOG_DBG("OPDS", "Download heap: %u free, %u max block", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
-  if (ESP.getFreeHeap() < HttpDownloader::MIN_TLS_FREE_HEAP ||
-      ESP.getMaxAllocHeap() < HttpDownloader::MIN_TLS_MAX_ALLOC) {
-    LOG_ERR("OPDS", "Low heap for download (%u free, %u max block)", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
-    state = BrowserState::ERROR;
-    errorMessage = tr(STR_DOWNLOAD_FAILED);
-    requestUpdate();
-    return;
-  }
+  HttpDownloader::DownloadError result = HttpDownloader::ABORTED;
+  if (server.useTailnet) {
+    // Same memory model as fetchFeed(): the panel keeps the "Downloading"
+    // frame, the framebuffer is lent to the heap for the tunnel + TLS, and no
+    // progress can be drawn until the transfer ends. The file lands on SD
+    // whichever way the display comes back (reclaim, or a reboot into the
+    // browse with the feed fetch pending).
+    requestUpdateAndWait();
+    if (!TAILNET.isUp()) TAILNET.setTargetUrl(downloadUrl);  // before the release (see fetchFeed)
+    bool started = false;
+    {
+      RenderLock lock;
+      renderer.releaseFrameBufferToHeap();
+      if (prepareTailnetUrl(downloadUrl)) {
+        started = true;
+        LOG_DBG("OPDS", "Downloading (tailnet): %s", downloadUrl.c_str());
+        result = HttpDownloader::downloadToFile(
+            downloadUrl, filename,
+            [this](const size_t downloaded, const size_t total) {
+              downloadProgress = downloaded;
+              downloadTotal = total;
+              // No display during the transfer, so progress goes to the log.
+              static unsigned long lastLogMs = 0;
+              if (millis() - lastLogMs >= DOWNLOAD_PROGRESS_MIN_UPDATE_MS) {
+                lastLogMs = millis();
+                LOG_INF("OPDS", "Download progress: %u / %u bytes", (unsigned)downloaded, (unsigned)total);
+              }
+              // Pump input so Back or the home gesture can abort mid-transfer.
+              mappedInput.update(true);
+              if (mappedInput.wasReleased(MappedInputManager::Button::Back)) cancelDownload = true;
+              if (mappedInput.wasHomeGesture()) {
+                cancelDownload = true;
+                goHomeAfterCancel = true;
+              }
+            },
+            &cancelDownload, server.username, server.password);
+        if (result == HttpDownloader::OK) {
+          clearBookCache(filename);
+          library::markLibraryIndexDirty();
+        }
+      } else if (tailnetRebootAttemptCount() == 0) {
+        TAILNET.teardown();
+        rebootIntoBrowse(ResumeMode::FETCH_PENDING);  // heap too fragmented: retry from a fresh boot
+      }
+      TAILNET.teardown();
+      if (!renderer.reacquireFrameBufferFromHeap()) rebootIntoBrowse(ResumeMode::FETCH_PENDING);
+    }
+    if (!started) {  // prepareTailnetUrl() set the error
+      requestUpdate();
+      return;
+    }
+  } else {
+    LOG_DBG("OPDS", "Download heap: %u free, %u max block", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+    if (ESP.getFreeHeap() < HttpDownloader::MIN_TLS_FREE_HEAP ||
+        ESP.getMaxAllocHeap() < HttpDownloader::MIN_TLS_MAX_ALLOC) {
+      LOG_ERR("OPDS", "Low heap for download (%u free, %u max block)", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+      state = BrowserState::ERROR;
+      errorMessage = tr(STR_DOWNLOAD_FAILED);
+      requestUpdate();
+      return;
+    }
 
-  int lastRenderedPercent = -1;
-  unsigned long lastProgressUpdateMs = 0;
-  const auto result = HttpDownloader::downloadToFile(
-      downloadUrl, filename,
-      [this, &lastRenderedPercent, &lastProgressUpdateMs](const size_t downloaded, const size_t total) {
-        downloadProgress = downloaded;
-        downloadTotal = total;
-        // The activity loop is blocked for the whole download; pump input here
-        // so the Cancel button or a Back press can abort mid-transfer.
-        mappedInput.update(true);
-        if (mappedInput.wasReleased(MappedInputManager::Button::Back)) cancelDownload = true;
-        // Home cancels immediately; other configured actions are deferred to
-        // the next main-loop pass by the transfer input pump.
-        if (mappedInput.wasHomeGesture()) {
-          cancelDownload = true;
-          goHomeAfterCancel = true;
-        }
-        routeTouch(mappedInput);
-        const int percent = total > 0 ? static_cast<int>(static_cast<uint64_t>(downloaded) * 100 / total) : 0;
-        const unsigned long now = millis();
-        if (percent >= 100 || lastRenderedPercent < 0 ||
-            percent >= lastRenderedPercent + DOWNLOAD_PROGRESS_STEP_PERCENT ||
-            now - lastProgressUpdateMs >= DOWNLOAD_PROGRESS_MIN_UPDATE_MS) {
-          lastRenderedPercent = percent;
-          lastProgressUpdateMs = now;
-          requestUpdate(true);
-        }
-      },
-      &cancelDownload, server.username, server.password);
+    int lastRenderedPercent = -1;
+    unsigned long lastProgressUpdateMs = 0;
+    result = HttpDownloader::downloadToFile(
+        downloadUrl, filename,
+        [this, &lastRenderedPercent, &lastProgressUpdateMs](const size_t downloaded, const size_t total) {
+          downloadProgress = downloaded;
+          downloadTotal = total;
+          // The activity loop is blocked for the whole download; pump input here
+          // so the Cancel button or a Back press can abort mid-transfer.
+          mappedInput.update(true);
+          if (mappedInput.wasReleased(MappedInputManager::Button::Back)) cancelDownload = true;
+          // Home cancels immediately; other configured actions are deferred to
+          // the next main-loop pass by the transfer input pump.
+          if (mappedInput.wasHomeGesture()) {
+            cancelDownload = true;
+            goHomeAfterCancel = true;
+          }
+          routeTouch(mappedInput);
+          const int percent = total > 0 ? static_cast<int>(static_cast<uint64_t>(downloaded) * 100 / total) : 0;
+          const unsigned long now = millis();
+          if (percent >= 100 || lastRenderedPercent < 0 ||
+              percent >= lastRenderedPercent + DOWNLOAD_PROGRESS_STEP_PERCENT ||
+              now - lastProgressUpdateMs >= DOWNLOAD_PROGRESS_MIN_UPDATE_MS) {
+            lastRenderedPercent = percent;
+            lastProgressUpdateMs = now;
+            requestUpdate(true);
+          }
+        },
+        &cancelDownload, server.username, server.password);
+  }
 
   if (result == HttpDownloader::OK) {
     clearBookCache(filename);
     library::markLibraryIndexDirty();
+    if (serveFromCache()) return;  // the released catalog, back from the card
     state = BrowserState::LOADING;
     statusMessage = tr(STR_LOADING);
     fetchFeed(currentPath);
@@ -566,6 +903,7 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
       onGoHome();
       return;
     }
+    if (serveFromCache()) return;
     state = BrowserState::LOADING;
     statusMessage = tr(STR_LOADING);
     fetchFeed(currentPath);
@@ -623,12 +961,38 @@ void OpdsBookBrowserActivity::performSearch(const std::string& query) {
   navigationHistory.push_back(currentPath);
   currentPath = url;
 
-  state = BrowserState::LOADING;
-  statusMessage = tr(STR_LOADING);
   releaseEntries();
   selectorIndex = 0;
+  if (serveFromCache()) return;
+  state = BrowserState::LOADING;
+  statusMessage = tr(STR_LOADING);
   requestUpdate(true);
-  fetchFeed(url);
+  checkAndConnectWifi();
+}
+
+bool OpdsBookBrowserActivity::prepareTailnetUrl(std::string& url) {
+  // Bring up the tunnel and rewrite the target host to its tailnet address.
+  // Blocks this task like downloadBook() does; the caller has painted the
+  // status screen and freed the framebuffer before entering here. Back/cancel
+  // cannot interrupt the bring-up itself (bounded by TailnetSession's own
+  // timeouts). Sets state/errorMessage on failure; the caller repaints.
+  if (!TAILNET.isUp()) {
+    TAILNET.setTargetUrl(url);
+  }
+  if (!TAILNET.ensureUp()) {
+    state = BrowserState::ERROR;
+    errorMessage = std::string(TAILNET.lastErrorCode()) + ": " + TAILNET.lastErrorMessage();
+    return false;
+  }
+
+  std::string rewritten = TAILNET.rewriteUrlForTailnet(url);
+  if (rewritten.empty()) {
+    state = BrowserState::ERROR;
+    errorMessage = std::string(TAILNET.lastErrorCode()) + ": " + TAILNET.lastErrorMessage();
+    return false;
+  }
+  url = std::move(rewritten);
+  return true;
 }
 
 void OpdsBookBrowserActivity::checkAndConnectWifi() {

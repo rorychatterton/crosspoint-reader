@@ -1,0 +1,48 @@
+Abortive TCP close for the freeink-sdk SecureClient (submodule libs/network/SecureNet).
+
+Apply from the submodule root with `git apply ../docs/patches/freeink-sdk-tcp-abortive-close.patch`.
+Compiled in only with -DCROSSPOINT_TCP_ABORTIVE_CLOSE and has no effect until
+CONFIG_LWIP_SO_LINGER=y is set in the sdkconfig. See docs/tailnet-offline-test-plan.md.
+
+diff --git a/libs/network/SecureNet/src/SecureClient.cpp b/libs/network/SecureNet/src/SecureClient.cpp
+index 2546073..33a2179 100644
+--- a/libs/network/SecureNet/src/SecureClient.cpp
++++ b/libs/network/SecureNet/src/SecureClient.cpp
+@@ -5,6 +5,12 @@
+ // integration point for the TLS 1.3 transport.
+ #if defined(FREEINK_NET_WOLFSSL)
+ #include <wolfssl/ssl.h>
++#if defined(CROSSPOINT_TCP_ABORTIVE_CLOSE)
++#include <lwip/sockets.h>
++#if !LWIP_SO_LINGER
++#warning "CROSSPOINT_TCP_ABORTIVE_CLOSE: CONFIG_LWIP_SO_LINGER is off, SO_LINGER is a no-op here"
++#endif
++#endif
+ #endif
+ 
+ namespace freeink {
+@@ -205,6 +211,24 @@ int SecureClient::available() {
+ void SecureClient::stop() {
+   if (_ssl) { wolfSSL_free(static_cast<WOLFSSL*>(_ssl)); _ssl = nullptr; }
+   if (_ctx) { wolfSSL_CTX_free(static_cast<WOLFSSL_CTX*>(_ctx)); _ctx = nullptr; }
++#if defined(CROSSPOINT_TCP_ABORTIVE_CLOSE)
++  // CROSSPOINT_TCP_ABORTIVE_CLOSE: the client is the active closer of every
++  // HTTPS connection, so lwIP parks each pcb in TIME_WAIT for 2*MSL (2 min
++  // with CONFIG_LWIP_TCP_MSL=60000) after a FIN close. On the ESP32-C3 those
++  // pcbs live in the heap and can pin the freed framebuffer region. Zero
++  // linger turns close() into a RST (tcp_abort): the pcb is freed at once.
++  // Needs CONFIG_LWIP_SO_LINGER=y; without it lwip_setsockopt ignores the
++  // option and the close stays orderly.
++  {
++    const int fd = _transport.fd();
++    if (fd >= 0) {
++      struct linger l;
++      l.l_onoff = 1;
++      l.l_linger = 0;
++      setsockopt(fd, SOL_SOCKET, SO_LINGER, &l, sizeof(l));
++    }
++  }
++#endif
+   _transport.stop();
+   _connected = false;
+ }

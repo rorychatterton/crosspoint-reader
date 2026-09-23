@@ -23,6 +23,7 @@ void KOReaderCredentialStore::toJson(JsonDocument& doc) const {
   doc["username"] = getUsername();
   doc["password_obf"] = obfuscation::obfuscateToBase64(getPassword());
   doc["serverUrl"] = getServerUrl();
+  doc["tailnet"] = getUseTailnet();
   doc["matchMethod"] = static_cast<uint8_t>(getMatchMethod());
   doc["sendMetadata"] = getSendMetadata();
   doc["syncBehavior"] = static_cast<uint8_t>(getSyncBehavior());
@@ -36,6 +37,7 @@ bool KOReaderCredentialStore::fromJson(JsonVariantConst doc) {
 
   setCredentials(user, pass);
   setServerUrl(doc["serverUrl"] | "");
+  setUseTailnet(doc["tailnet"] | false);
 
   // The default server changed in config v2 (sync.koreader.rocks -> crosspoint-sync).
   // A pre-v2 config with credentials and no explicit URL was actively syncing

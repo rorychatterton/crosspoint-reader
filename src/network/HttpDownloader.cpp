@@ -30,7 +30,11 @@ constexpr int HTTP_TX_BUF = 512;
 // (>15s) and chunked catalogs stall mid-body, so 15s killed them. 60s gives
 // slow servers room. esp_http_client's timeout_ms is uint32, so unlike Arduino
 // HTTPClient's uint16 setTimeout it doesn't silently truncate.
-constexpr int HTTP_TIMEOUT_MS = 60000;
+// -DCROSSPOINT_HTTP_TIMEOUT_MS=<ms> overrides it for soak builds (self-test).
+#ifndef CROSSPOINT_HTTP_TIMEOUT_MS
+#define CROSSPOINT_HTTP_TIMEOUT_MS 60000
+#endif
+constexpr int HTTP_TIMEOUT_MS = CROSSPOINT_HTTP_TIMEOUT_MS;
 constexpr size_t READ_CHUNK = 1024;
 constexpr int MAX_REDIRECTS = 5;
 
@@ -309,10 +313,12 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
   sink.cancelFlag = cancelFlag;
   sink.write = [&file](const uint8_t* data, size_t len) { return file.write(data, len) == len; };
 
+  const unsigned long startMs = millis();
   const DownloadError result = runGetSecure(url, username, password, sink, downgradeRedirectsToHttp);
   // Close before any remove() on the same path; DESTRUCTOR_CLOSES_FILE would
-  // otherwise close only after the remove.
-  file.close();
+  // otherwise close only after the remove. close() does the final SD flush and
+  // directory-entry write, so its failure means a truncated file.
+  const bool closed = file.close();
 
   if (result != OK) {
     Storage.remove(destPath.c_str());
@@ -323,6 +329,29 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
     Storage.remove(destPath.c_str());
     return HTTP_ERROR;
   }
-  LOG_DBG("HTTP", "Downloaded %zu bytes", sink.downloaded);
+  if (!closed) {
+    LOG_ERR("HTTP", "close/sync failed after %zu bytes", sink.downloaded);
+    Storage.remove(destPath.c_str());
+    return FILE_ERROR;
+  }
+  if (sink.total > 0 && sink.downloaded != sink.total) {
+    LOG_ERR("HTTP", "short body: %zu of %zu bytes", sink.downloaded, sink.total);
+    Storage.remove(destPath.c_str());
+    return HTTP_ERROR;
+  }
+  // Verify what actually landed on SD against what was received.
+  size_t onDisk = 0;
+  {
+    HalFile check;
+    if (Storage.openFileForRead("HTTP", destPath.c_str(), check)) onDisk = check.fileSize();
+  }
+  if (onDisk != sink.downloaded) {
+    LOG_ERR("HTTP", "SD size mismatch: %zu on disk, %zu received", onDisk, sink.downloaded);
+    Storage.remove(destPath.c_str());
+    return FILE_ERROR;
+  }
+  const unsigned long ms = millis() - startMs;
+  LOG_INF("HTTP", "Downloaded %zu bytes (content-length %zu) in %lu ms, %u KB/s", sink.downloaded, sink.total, ms,
+          ms > 0 ? static_cast<unsigned>(sink.downloaded / ms) : 0u);
   return OK;
 }

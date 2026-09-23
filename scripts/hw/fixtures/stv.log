@@ -1,0 +1,155 @@
+ESP-ROM:esp32c3-api1-20210207
+Build:Feb  7 2021
+rst:0x15 (USB_UART_CHIP_RESET),boot:0x9 (SPI_FAST_FLASH_BOOT)
+Saved PC:0x40384e4e
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fcd5820,len:0x1010
+load:0x403cbf10,len:0x9f4
+load:0x403ce710,len:0x2ea4
+entry 0x403cbf10
+[266] [INF] [HW] Using cached device type: X3
+[266] [XTDET] NVS hw_calib/screenType: not set
+[386] [XTDET] bus probe VER=00 00 66 00 00 FLG=13 -> UltraChip
+[387] [XTDET] MTP[0x000..0x02F]: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 66 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[387] [XTDET] promoted UC8253 -> UC8279
+[   388][E][Wire.cpp:424] beginTransmission(): could not acquire lock
+[   394][E][Wire.cpp:556] write(): NULL TX buffer pointer
+[   399][E][Wire.cpp:453] endTransmission(): NULL TX buffer pointer
+[   407][E][Wire.cpp:424] beginTransmission(): could not acquire lock
+[   413][E][Wire.cpp:556] write(): NULL TX buffer pointer
+[   419][E][Wire.cpp:453] endTransmission(): NULL TX buffer pointer
+[428] [INF] [GYR] SDK IMU initialized
+[429] [INF] [CLK] SDK RTC found[429] [INF] [MAIN] Hardware detect: X3
+[446] [SD] SD card detected
+[468] [DBG] [CPS] Settings loaded from file
+[476] [DBG] [RBS] Recent books loaded from file (1 entries)
+[483] [DBG] [KRS] Set credentials for user: rory
+[484] [DBG] [KRS] Set server URL: https://calibre.lab.wayvz.io/
+[484] [DBG] [KRS] Set match method: Filename
+[484] [DBG] [KRS] Set send metadata: false
+[484] [DBG] [KRS] Set sync behavior: Smart
+[490] [DBG] [OPS] Loaded 1 OPDS servers from file
+[496] [DBG] [TSS] Loaded tailscale config (authKey set)
+[497] [ERR] [SELFTEST] ========== SELFTEST begin target=100.93.9.14 ==========
+[504] [DBG] [WCS] Loaded 3 WiFi credentials from file
+[558] [ERR] [SELFTEST] SELFTEST wifi: 3 saved credentials
+[558] [ERR] [SELFTEST] SELFTEST wifi: trying Work Inc Secondary
+[15771] [ERR] [SELFTEST] SELFTEST wifi: Work Inc Secondary failed
+[15773] [ERR] [SELFTEST] SELFTEST wifi: trying Chatthomelink
+[30985] [ERR] [SELFTEST] SELFTEST wifi: Chatthomelink failed
+[30987] [ERR] [SELFTEST] SELFTEST wifi: trying Work inc Secondary
+[33878] [ERR] [SELFTEST] SELFTEST wifi: connected Work inc Secondary ip=10.100.56.10
+[33879] [ERR] [SELFTEST] SELFTEST framebuffer model=48000 (ok) free_now=101004
+[33879] [ERR] [SELFTEST] SELFTEST ballast reserve=65004 got=65004 free_now=31852 (ok)
+[33885] [DBG] [OPS] Loaded 1 OPDS servers from file
+[33885] [ERR] [SELFTEST] SELFTEST opds url=https://calibre.lab.wayvz.io/opds free=31800
+[33888] [ERR] [SELFTEST] SELFTEST spool open=ok free=31704
+[33888] [ERR] [SELFTEST] SELFTEST fb released free=80860 largest=49140
+[ 33967][E][NetworkManager.cpp:138] hostByName(): DNS Failed for 'calibre.lab.wayvz.io' with error '-54'
+[33977] [INF] [TSN] Wi-Fi DNS could not resolve calibre.lab.wayvz.io
+[33977] [INF] [TSN] Using cached tailnet address 100.70.198.230 for calibre.lab.wayvz.io
+[34110] [INF] [TSN] Starting tailnet session (free heap 56328)
+E (40580) ml_derp: DERP TLS heap before handshake: free=26500 largest=23540 relay=derp5e.tailscale.com region=5
+[40487] [INF] [TSN] Tailnet up after 6376 ms (free heap 32684)
+[WG_TX] Handshake init sent, result=0, sender_idx=730268853, to DERP:0
+[WG_RX] Handshake RESPONSE! receiver_idx=730268853 sender_idx=2021438019
+[WG_RX] Response MAC check PASSED
+[WG_RX] Peer found for handshake, processing response
+[WG] *** HANDSHAKE COMPLETE! wg_idx=1 key=14bec4dd from=DERP:0 ***
+[WG] Session started, sending keepalive to DERP:0
+[WG] *** WIREGUARD SESSION ESTABLISHED wg_idx=1 ***
+[WG_TX] Handshake init sent, result=0, sender_idx=592265785, to DERP:0
+[WG_RX] Handshake RESPONSE! receiver_idx=592265785 sender_idx=3449716773
+[WG_RX] Response MAC check PASSED
+[WG_RX] Peer found for handshake, processing response
+[WG] *** HANDSHAKE COMPLETE! wg_idx=0 key=eb6fb18d from=DERP:0 ***
+[WG] Session started, sending keepalive to DERP:0
+[WG] *** WIREGUARD SESSION ESTABLISHED wg_idx=0 ***
+[41737] [ERR] [SELFTEST] SELFTEST tunnel_url=https://calibre.lab.wayvz.io/opds free=32848 largest=14836
+[41737] [DBG] [HTTP] Fetching: https://calibre.lab.wayvz.io/opds
+[41739] [DBG] [HTTP] wolfSSL GET: https://calibre.lab.wayvz.io/opds
+[SecureClient] handshake ok (auto): TLSv1.3 / TLS_AES_128_GCM_SHA256 in 608 ms
+[42731] [ERR] [SELFTEST] SELFTEST fetch=OK bytes=5253 after=993ms free=28704 largest=13300
+[42732] [ERR] [TSN] Could not set DNS server
+[42732] [INF] [TSN] Tearing down tailnet session
+E (43790) microlink: STACK_HWM min-free/size bytes: coord=4652/8192 derp_tx=3520/6144 net_io=3860/6144 wg_mgr=3692/6144
+[42887] [ERR] [SELFTEST] SELFTEST post-teardown free=79404 largest=24564
+[42887] [ERR] [SELFTEST] SELFTEST fb reclaim try=0 fail free=79404 largest=24564
+[43087] [ERR] [SELFTEST] SELFTEST fb reclaim try=1 fail free=79516 largest=24564
+[43287] [ERR] [SELFTEST] SELFTEST fb reclaim try=2 fail free=79516 largest=24564
+[43487] [ERR] [SELFTEST] SELFTEST fb reclaim try=3 fail free=79468 largest=24564
+[43687] [ERR] [SELFTEST] SELFTEST fb reclaim try=4 fail free=79516 largest=24564
+[43887] [ERR] [SELFTEST] SELFTEST fb reclaim try=5 fail free=79516 largest=24564
+[44087] [ERR] [SELFTEST] SELFTEST fb reclaim try=6 fail free=79516 largest=24564
+[44287] [ERR] [SELFTEST] SELFTEST fb reclaim try=7 fail free=79516 largest=24564
+[44487] [ERR] [SELFTEST] SELFTEST fb reclaim try=8 fail free=79516 largest=24564
+[44687] [ERR] [SELFTEST] SELFTEST fb reclaim try=9 fail free=79468 largest=24564
+[44688] [ERR] [SELFTEST] SELFTEST fb reclaim=FAIL (48000 bytes) free=79468 largest=24564
+[44688] [ERR] [SELFTEST] SELFTEST survivors=6 in region 0x3fcc0374..0x3fccbef4
+[44689] [ERR] [SELFTEST] SELFTEST survivor #1 off=24908 size=104 first=abba1234
+[44689] [ERR] [SELFTEST] SELFTEST survivor #2 off=25016 size=104 first=abba1234
+[44689] [ERR] [SELFTEST] SELFTEST survivor #3 off=29892 size=36 first=abba1234
+[44689] [ERR] [SELFTEST] SELFTEST survivor #4 off=30704 size=108 first=abba1234
+[44689] [ERR] [SELFTEST] SELFTEST survivor #5 off=30872 size=24 first=abba1234
+[44689] [ERR] [SELFTEST] SELFTEST survivor #6 off=32540 size=48 first=abba1234
+[44709] [ERR] [SELFTEST] SELFTEST spool readback=5253 free=79516 largest=24564
+[44709] [ERR] [SELFTEST] SELFTEST RESULT=FAIL
+[44710] [ERR] [SELFTEST] SELFTEST done; rebooting in 10s
+ESP-ROM:esp32c3-api1-20210207
+Build:Feb  7 2021
+rst:0xc (RTC_SW_CPU_RST),boot:0x9 (SPI_FAST_FLASH_BOOT)
+Saved PC:0x4038753e
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fcd5820,len:0x1010
+load:0x403cbf10,len:0x9f4
+load:0x403ce710,len:0x2ea4
+entry 0x403cbf10
+[272] [INF] [HW] Using cached device type: X3
+[272] [XTDET] NVS hw_calib/screenType: not set
+[392] [XTDET] bus probe VER=00 00 66 00 00 FLG=13 -> UltraChip
+[393] [XTDET] MTP[0x000..0x02F]: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 66 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[393] [XTDET] promoted UC8253 -> UC8279
+[   394][E][Wire.cpp:424] beginTransmission(): could not acquire lock
+[   400][E][Wire.cpp:556] write(): NULL TX buffer pointer
+[   405][E][Wire.cpp:453] endTransmission(): NULL TX buffer pointer
+[   413][E][Wire.cpp:424] beginTransmission(): could not acquire lock
+[   419][E][Wire.cpp:556] write(): NULL TX buffer pointer
+[   425][E][Wire.cpp:453] endTransmission(): NULL TX buffer pointer
+[434] [INF] [GYR] SDK IMU initialized
+[435] [INF] [CLK] SDK RTC found[435] [INF] [MAIN] Hardware detect: X3
+[454] [SD] SD card detected
+[475] [DBG] [CPS] Settings loaded from file
+[483] [DBG] [RBS] Recent books loaded from file (1 entries)
+[491] [DBG] [KRS] Set credentials for user: rory
+[491] [DBG] [KRS] Set server URL: https://calibre.lab.wayvz.io/
+[491] [DBG] [KRS] Set match method: Filename
+[491] [DBG] [KRS] Set send metadata: false
+[491] [DBG] [KRS] Set sync behavior: Smart
+[497] [DBG] [OPS] Loaded 1 OPDS servers from file
+[504] [DBG] [TSS] Loaded tailscale config (authKey set)
+[504] [ERR] [SELFTEST] ========== SELFTEST begin target=100.93.9.14 ==========
+[511] [DBG] [WCS] Loaded 3 WiFi credentials from file
+[563] [ERR] [SELFTEST] SELFTEST wifi: 3 saved credentials
+[563] [ERR] [SELFTEST] SELFTEST wifi: trying Work Inc Secondary
+[15773] [ERR] [SELFTEST] SELFTEST wifi: Work Inc Secondary failed
+[15775] [ERR] [SELFTEST] SELFTEST wifi: trying Chatthomelink
+[30985] [ERR] [SELFTEST] SELFTEST wifi: Chatthomelink failed
+[30987] [ERR] [SELFTEST] SELFTEST wifi: trying Work inc Secondary
+[32888] [ERR] [SELFTEST] SELFTEST wifi: connected Work inc Secondary ip=10.100.56.10
+[32889] [ERR] [SELFTEST] SELFTEST framebuffer model=48000 (ok) free_now=100732
+[32889] [ERR] [SELFTEST] SELFTEST ballast reserve=64732 got=64732 free_now=31836 (ok)
+[32896] [DBG] [OPS] Loaded 1 OPDS servers from file
+[32897] [ERR] [SELFTEST] SELFTEST opds url=https://calibre.lab.wayvz.io/opds free=31784
+[32902] [ERR] [SELFTEST] SELFTEST spool open=ok free=31736
+[32903] [ERR] [SELFTEST] SELFTEST fb released free=80892 largest=49140
+[ 32963][E][NetworkManager.cpp:138] hostByName(): DNS Failed for 'calibre.lab.wayvz.io' with error '-54'
+[32973] [INF] [TSN] Wi-Fi DNS could not resolve calibre.lab.wayvz.io
+[32973] [INF] [TSN] Using cached tailnet address 100.70.198.230 for calibre.lab.wayvz.io
+[32999] [INF] [TSN] Starting tailnet session (free heap 56548)
+E (39356) ml_derp: DERP TLS heap before handshake: free=26908 largest=23540 relay=derp5e.tailscale.com region=5
+[38900] [INF] [TSN] Tailnet up after 5900 ms (free heap 29940)
+[WG_PERIODIC] Handshake retry wg_idx=1 key=14bec4dd ip=0.0.0.0:0 connect_ip=14.203.10.62:40453 active=1 send_hs=1
+[WG_TX] Handshake init sent, result=0, sender_idx=2036277387, to DERP:0
+[WG_TX] Handshake init sent, result=0, sender_idx=2177365695, to DERP:0

@@ -12,9 +12,9 @@
 namespace fui = freeink::ui;
 
 namespace {
-// Editable fields: Name, URL, Username, Password.
+// Editable fields: Name, URL, Username, Password, Tailscale tunnel.
 // Existing servers also show a Delete option (BASE_ITEMS + 1).
-constexpr int BASE_ITEMS = 4;
+constexpr int BASE_ITEMS = 5;
 }  // namespace
 
 OpdsSettingsActivity::OpdsSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
@@ -23,7 +23,7 @@ OpdsSettingsActivity::OpdsSettingsActivity(GfxRenderer& renderer, MappedInputMan
   // Labels never change (unlike the values, which track editServer's fields
   // live), so they're set once here rather than every buildScreen() call.
   static constexpr StrId fieldNames[BASE_ITEMS] = {StrId::STR_SERVER_NAME, StrId::STR_OPDS_SERVER_URL,
-                                                   StrId::STR_USERNAME, StrId::STR_PASSWORD};
+                                                   StrId::STR_USERNAME, StrId::STR_PASSWORD, StrId::STR_USE_TAILNET};
   for (int i = 0; i < BASE_ITEMS; i++) {
     fieldRowItems[i].label = I18N.get(fieldNames[i]);
     fieldRowItems[i].actionValue = static_cast<int16_t>(i);
@@ -150,7 +150,12 @@ void OpdsSettingsActivity::handleSelection() {
     startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_PASSWORD),
                                                                    editServer.password, 63, InputType::Text),
                            handler);
-  } else if (nav.selected == 4 && !isNewServer) {
+  } else if (nav.selected == 4) {
+    // Tailscale tunnel toggle: flips in place, no keyboard needed.
+    editServer.useTailnet = !editServer.useTailnet;
+    saveServer();
+    requestUpdate();
+  } else if (nav.selected == 5 && !isNewServer) {
     // Delete flow is only available for existing servers.
     if (!OPDS_STORE.removeServer(static_cast<size_t>(serverIndex))) {
       LOG_ERR("OPS", "Failed to remove OPDS server at index %d", serverIndex);
@@ -186,6 +191,7 @@ void OpdsSettingsActivity::buildScreen(UiScreen& screen) {
   fieldRowItems[1].value = editServer.url.empty() ? tr(STR_NOT_SET) : editServer.url.c_str();
   fieldRowItems[2].value = editServer.username.empty() ? tr(STR_NOT_SET) : editServer.username.c_str();
   fieldRowItems[3].value = editServer.password.empty() ? tr(STR_NOT_SET) : "******";
+  fieldRowItems[4].value = editServer.useTailnet ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
 
   fui::ListProps props;
   props.items = fieldRowItems;

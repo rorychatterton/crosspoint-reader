@@ -1,0 +1,16 @@
+{
+  "name": "WireGuardLwip",
+  "version": "1.0.0-crosspoint",
+  "description": "WireGuard implementation for lwIP (smartalock/wireguard-lwip fork vendored from MicroLink, refc crypto only). ESP32 platform glue included.",
+  "license": "BSD-3-Clause",
+  "frameworks": ["arduino", "espidf"],
+  "platforms": ["espressif32"],
+  "build": {
+    "srcDir": "src",
+    "includeDir": "src",
+    "flags": [
+      "-DWIREGUARD_CRYPTO_REFC=1",
+      "-Wno-stringop-overread"
+    ]
+  }
+}
