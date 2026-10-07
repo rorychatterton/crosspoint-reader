@@ -1053,6 +1053,25 @@ err_t wireguardif_update_endpoint(struct netif *netif, u8_t peer_index, const ip
 	return result;
 }
 
+// Send to ip:port from now on (any address = DERP relay) without a new
+// handshake: session keys do not depend on the path. Held under the core lock
+// so TCP/IP thread output never sees a half-written address.
+err_t wireguardif_set_peer_endpoint(struct netif *netif, u8_t peer_index, const ip_addr_t *ip, u16_t port) {
+	struct wireguard_peer *peer;
+	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
+	if (result == ERR_OK) {
+		bool locked = wg_lwip_lock();
+		peer->ip = *ip;
+		peer->port = ip_addr_isany(ip) ? 0 : port;
+		if (!ip_addr_isany(ip)) {
+			peer->connect_ip = *ip;
+			peer->connect_port = port;
+		}
+		wg_lwip_unlock(locked);
+	}
+	return result;
+}
+
 
 err_t wireguardif_add_peer(struct netif *netif, struct wireguardif_peer *p, u8_t *peer_index) {
 	LWIP_ASSERT("netif != NULL", (netif != NULL));

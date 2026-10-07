@@ -249,9 +249,10 @@ bool TailnetSession::startBringUp(const uint32_t timeoutMs) {
     config.device_name = TAILSCALE_STORE.getDeviceName().empty() ? microlink_default_device_name()
                                                                  : TAILSCALE_STORE.getDeviceName().c_str();
     config.enable_derp = true;
-    // No control connection exists in a warm session to report STUN
-    // endpoints to; the relayed path is all a download session needs.
-    config.enable_stun = !warmActive;
+    // STUN starts after CONNECTED (no delay to the first byte); the public
+    // endpoint goes to the peers in CallMeMaybe so a long transfer can move
+    // off the relay onto a direct UDP path.
+    config.enable_stun = true;
     config.enable_disco = true;
     if (warmActive) {
       config.warm_start = true;

@@ -126,6 +126,18 @@ extern "C" {
 #define ML_DISCO_UPGRADE_INTERVAL_MS 15000
 #define ML_DISCO_SESSION_ACTIVE_MS 45000
 
+/* Hole punching (CrossPoint fork). After our public endpoint goes out in a
+ * CallMeMaybe, or the peer signals (CallMeMaybe, direct ping), ping its
+ * endpoints directly every PUNCH_INTERVAL until a direct pong arrives or the
+ * window closes; the 15 s upgrade cadence is too slow for minute-long
+ * sessions and never fires in page-sized ones. */
+#ifndef ML_DISCO_PUNCH_WINDOW_MS
+#define ML_DISCO_PUNCH_WINDOW_MS 20000
+#endif
+#ifndef ML_DISCO_PUNCH_INTERVAL_MS
+#define ML_DISCO_PUNCH_INTERVAL_MS 1000
+#endif
+
 /* STUN servers (Tailscale primary, Google fallback) */
 #define ML_STUN_PRIMARY_HOST "derp9.tailscale.com"
 #define ML_STUN_PRIMARY_PORT 3478
@@ -335,6 +347,15 @@ typedef struct {
 
   /* On-demand handshake: tried once on first DISCO direct path discovery */
   bool tried_initial_handshake;
+
+  /* Hole punching and path reporting (CrossPoint fork) */
+  uint64_t punch_until_ms;  /* Fast direct probing until (0 = off) */
+  uint64_t last_punch_ms;   /* Last fast direct probe */
+  uint32_t first_direct_ms; /* Session time of the first direct path (0 = never) */
+  uint16_t direct_switches; /* WG output moved relay -> direct */
+  uint16_t derp_fallbacks;  /* WG output moved direct -> relay */
+  bool wg_direct;           /* WG output currently goes to a direct endpoint */
+  bool cmm_rx_logged;       /* First CallMeMaybe from this peer logged */
 } ml_peer_t;
 
 /* ============================================================================
@@ -404,6 +425,7 @@ typedef struct {
   bool tls_inited; /* TLS objects created (freed on disconnect) */
   bool connected;
   uint64_t last_recv_ms; /* For keepalive watchdog */
+  uint32_t server_ip4;   /* Relay's IPv4, host order (0 = IPv6/unknown); STUN is on the same host */
 } ml_derp_conn_t;
 
 /* Bring-up phase durations in ms, filled by the coord and DERP tasks and

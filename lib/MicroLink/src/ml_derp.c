@@ -787,6 +787,8 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
         ml_freeaddrinfo(res);
         return ESP_FAIL;
     }
+    ml->derp.server_ip4 = (res->ai_family == AF_INET)
+        ? ntohl(((struct sockaddr_in *)res->ai_addr)->sin_addr.s_addr) : 0;
     ml_freeaddrinfo(res);
 
     int64_t t_derp_tcp = esp_timer_get_time();

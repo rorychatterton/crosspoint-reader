@@ -226,13 +226,12 @@ microlink_t* microlink_init(const microlink_config_t* config) {
   ml->config.enable_derp = true; /* Always need DERP for relay */
 
   /* Warm start needs the target by address (the NVS table is keyed by it)
-   * and our cached VPN IP; anything less is a cold start. STUN is skipped:
-   * there is no control connection to report endpoints to. */
+   * and our cached VPN IP; anything less is a cold start. STUN still runs
+   * once the session is up: its result reaches the peers in CallMeMaybe. */
   if (ml->config.warm_start && (ml->config.priority_peer_ip == 0 || ml->config.warm_self_ip == 0)) {
     ESP_LOGE(TAG, "Warm start needs priority_peer_ip and warm_self_ip; starting cold");
     ml->config.warm_start = false;
   }
-  if (ml->config.warm_start) ml->config.enable_stun = false;
 
   ml->state = ML_STATE_IDLE;
   ml->coord_sock = -1;

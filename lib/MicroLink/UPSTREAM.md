@@ -109,6 +109,11 @@ assembly), `example/`, `CMakeLists.txt`.
 - `src/wireguardif.{c,h}`: `wireguardif_peer_confirm_pending()` reports a
   responder keypair waiting in `next_keypair` for the initiator's first
   packet (the session cannot send until then).
+- `src/wireguardif.{c,h}`: `wireguardif_set_peer_endpoint()` moves a peer's
+  output (`ip`/`port`, plus `connect_ip` for a real address) to a direct
+  endpoint or back to the relay (any address) under the lwIP core lock,
+  without a handshake. Upstream's only switch, `wireguardif_connect()` /
+  `wireguardif_connect_derp()`, forces a new handshake each time.
 
 ## Behavioral limits accepted for this target
 
@@ -340,8 +345,9 @@ assembly), `example/`, `CMakeLists.txt`.
   advertised route and moved to blob key `tbl2` (97-byte entries; a
   pre-route `tbl` blob is erased on init). Mechanism:
   - `microlink_init()` skips the 16.4 KB control workspace reservation
-    (`ML_TARGET_BOOTSTRAP_RESERVED_BYTES`) and forces `enable_stun=false`;
-    `microlink_start()` creates all four tasks at once.
+    (`ML_TARGET_BOOTSTRAP_RESERVED_BYTES`); `microlink_start()` creates all
+    four tasks at once. STUN still runs after CONNECTED (see "Direct path"
+    below; warm sessions used to force `enable_stun=false`).
   - `ml_coord_task` enters `COORD_WARM` instead of `COORD_DNS_RESOLVE`:
     `do_warm_start()` sets `vpn_ip`, `derp_home_region` and
     `target_derp_region` from the cached values and queues `ML_PEER_ADD`
@@ -383,6 +389,57 @@ assembly), `example/`, `CMakeLists.txt`.
     without a TS-E error re-caches at teardown; any TS-E error at
     teardown clears the cache. `microlink_peer_cache_poison()` flips one
     key byte for the self-test's `poisonNetmapCache` scenario.
+- Direct path (disco hole punching) for long transfers. Every session
+  relayed through DERP for its whole life. Causes found in the code: the
+  targeted path closes the control socket before STUN runs, so our public
+  endpoint never reaches control (peers' netmaps list only our LAN address);
+  warm sessions disabled STUN, so the CallMeMaybe carried only the LAN
+  address and the peer never pinged our public mapping (its NAT then drops
+  our pings); after the add-time ping the next one came 15-16 s later (the
+  first upgrade tick was swallowed by the 5 s rate limit but still reset
+  `last_upgrade_ms`); a relayed pong freed the probe slot, so the direct pong
+  of the same ping was "unmatched"; CallMeMaybe endpoints were pinged once
+  and forgotten; and all disco logging was `ESP_LOGI`, compiled out on the
+  device (`CONFIG_LOG_MAXIMUM_LEVEL=1`). Changes (`src/ml_wg_mgr.c` unless
+  noted):
+  - STUN runs in warm sessions too (`microlink.c` no longer forces
+    `enable_stun=false`; the reader sets it always). It still starts only
+    after CONNECTED, so the first byte is not delayed. `begin_stun_probe()`
+    (`src/ml_coord.c`) probes the connected relay's own IPv4 on 3478
+    (`ml_derp_conn_t.server_ip4`, recorded in `src/ml_derp.c`) before any
+    DNS, then resolves the Google fallback for the NAT-type check.
+  - Hole punching: when the STUN CallMeMaybe goes out, when the peer sends a
+    CallMeMaybe, and when a direct disco ping arrives, the peer gets a punch
+    window (`ML_DISCO_PUNCH_WINDOW_MS` 20 s): one ping to every known IPv4
+    endpoint each `ML_DISCO_PUNCH_INTERVAL_MS` (1 s), no relay copy, one
+    probe slot per round, driven from the wg_mgr loop (`disco_punch_due()`).
+    CallMeMaybe endpoints and the source of a direct ping or of authenticated
+    direct WireGuard data are merged into the peer's endpoint table
+    (`peer_add_endpoint()`, private addresses evicted first when full).
+  - A relayed pong no longer consumes the probe slot. A direct pong sets the
+    confirmed path and, for an established session, moves WireGuard output
+    there with `wireguardif_set_peer_endpoint()` (no handshake). Trust expiry
+    moves it back to the relay the same way, instead of
+    `wireguardif_connect_derp()`. Authenticated direct data from the
+    confirmed endpoint renews trust (detected by `last_rx` moving across
+    `wireguardif_network_rx()`), so one lost heartbeat pong does not drop the
+    path. Output that WireGuard roamed to an unconfirmed address returns to
+    the relay when its punch window ends without a pong.
+  - New peers start on the relay: for a peer it creates, `add_peer()`
+    clears the WireGuard output address after `wireguardif_add_peer()` (map
+    endpoint 0 stays as `connect_ip`), so an unconfirmed endpoint never
+    carries data.
+  - Upgrade probes set `last_upgrade_ms` only when a ping was sent.
+  - `ESP_LOGE` lines prefixed `[DIRECT]`: STUN public endpoint and NAT
+    mapping check (`src/ml_coord.c`), our CallMeMaybe with the public
+    endpoint, the peer's first CallMeMaybe, a direct ping from a new source,
+    the confirming pong (rtt), every relay/direct change of WireGuard output
+    ("direct path to a.b.c.d:p after N ms (reason)"), and a per-peer
+    summary at task exit.
+  Memory: ~32 bytes more per `ml_peer_t` (x `ML_MAX_PEERS`), no new socket
+  or buffer. Not exercised by `test/tailnet_qemu`: its peers are DERP-only
+  wireguard-go binds that drop disco, and the guest sits behind QEMU user
+  networking.
 - Self-test harness (`src/TailnetSelfTest.{h,cpp}`, `[env:selftest]`,
   CROSSPOINT_TAILNET_SELFTEST). Runs the full tailnet bring-up + WireGuard
   handshake to a list of target IPs on boot, logs RESULT= per target at ERROR

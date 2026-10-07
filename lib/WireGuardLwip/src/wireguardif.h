@@ -120,6 +120,10 @@ err_t wireguardif_remove_peer(struct netif *netif, u8_t peer_index);
 // Update the "connect" IP of the given peer
 err_t wireguardif_update_endpoint(struct netif *netif, u8_t peer_index, const ip_addr_t *ip, u16_t port);
 
+// Move the peer's output to ip:port now (any address = DERP relay), keeping
+// the current session: no handshake is started
+err_t wireguardif_set_peer_endpoint(struct netif *netif, u8_t peer_index, const ip_addr_t *ip, u16_t port);
+
 // Add a further allowed IP/netmask to an existing peer (outbound routing and
 // inbound source validation). Slots are limited by WIREGUARD_MAX_SRC_IPS.
 err_t wireguardif_add_allowed_ip(struct netif *netif, u8_t peer_index, const ip_addr_t *ip, const ip_addr_t *mask);

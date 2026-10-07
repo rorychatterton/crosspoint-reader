@@ -256,17 +256,28 @@ static bool is_targeted_session(const microlink_t* ml) {
 
 static void begin_stun_probe(microlink_t* ml) {
   ESP_LOGI(TAG, "Running STUN probe...");
+  /* Every Tailscale relay node answers STUN on the same host, and the
+   * connected one is the nearest known server: probe it before any DNS so
+   * the public endpoint (and the CallMeMaybe carrying it) is not delayed. */
+  bool primary_sent = false;
+  if (ml->stun_primary_ip == 0 && ml->derp.connected && ml->derp.server_ip4 != 0) {
+    ml->stun_primary_ip = ml->derp.server_ip4;
+    ml->stun_last_probe_ms = ml_get_time_ms();
+    primary_sent = ml_stun_send_probe_to(ml, ml->stun_primary_ip, ML_STUN_PRIMARY_PORT) == ESP_OK;
+  }
   ml_stun_resolve_servers(ml);
   ml->stun_retry_count = 1;
   ml->stun_using_fallback = false;
-  ml->stun_last_probe_ms = ml_get_time_ms();
-  if (ml->stun_primary_ip) {
-    ml_stun_send_probe_to(ml, ml->stun_primary_ip, ML_STUN_PRIMARY_PORT);
-  } else if (ml->stun_fallback_ip) {
-    ml->stun_using_fallback = true;
-    ml_stun_send_probe_to(ml, ml->stun_fallback_ip, ML_STUN_FALLBACK_PORT);
-  } else {
-    ml_stun_send_probe(ml, ML_STUN_PRIMARY_HOST, ML_STUN_PRIMARY_PORT);
+  if (!primary_sent) {
+    ml->stun_last_probe_ms = ml_get_time_ms();
+    if (ml->stun_primary_ip) {
+      ml_stun_send_probe_to(ml, ml->stun_primary_ip, ML_STUN_PRIMARY_PORT);
+    } else if (ml->stun_fallback_ip) {
+      ml->stun_using_fallback = true;
+      ml_stun_send_probe_to(ml, ml->stun_fallback_ip, ML_STUN_FALLBACK_PORT);
+    } else {
+      ml_stun_send_probe(ml, ML_STUN_PRIMARY_HOST, ML_STUN_PRIMARY_PORT);
+    }
   }
   static const uint8_t zero16[16] = {0};
   if (memcmp(ml->stun_primary_ip6, zero16, sizeof(zero16)) != 0) {
@@ -2859,6 +2870,10 @@ void ml_coord_task(void* arg) {
               ml->stun_public_ip = pub_ip;
               ml->stun_public_port = pub_port;
               ml->stun_retry_count = 0;
+              ESP_LOGE(TAG, "[DIRECT] STUN public endpoint %u.%u.%u.%u:%u (local port %u) after %u ms",
+                       (unsigned)(pub_ip >> 24), (unsigned)((pub_ip >> 16) & 0xff), (unsigned)((pub_ip >> 8) & 0xff),
+                       (unsigned)(pub_ip & 0xff), (unsigned)pub_port, (unsigned)ml->disco_local_port,
+                       (unsigned)(now - ml->timing.start_ms));
               /* Send probe to fallback for symmetric NAT check */
               if (!ml->stun_nat_checked && ml->stun_fallback_ip) {
                 ml_stun_send_probe_to(ml, ml->stun_fallback_ip, ML_STUN_FALLBACK_PORT);
@@ -2870,15 +2885,15 @@ void ml_coord_task(void* arg) {
               ml->stun_nat_checked = true;
               if (ml->stun_public_port != pub_port) {
                 ml->nat_mapping_varies = true;
-                ESP_LOGW(TAG,
-                         "Symmetric NAT detected: port %u vs %u "
-                         "(direct connections unlikely)",
+                ESP_LOGE(TAG,
+                         "[DIRECT] NAT mapping varies by destination: port %u vs %u "
+                         "(symmetric NAT, direct path unlikely)",
                          ml->stun_public_port, pub_port);
               } else {
                 ml->nat_mapping_varies = false;
-                ESP_LOGI(TAG,
-                         "Cone NAT: port %u consistent "
-                         "(direct connections possible)",
+                ESP_LOGE(TAG,
+                         "[DIRECT] NAT mapping stable: port %u for both STUN servers "
+                         "(direct path possible)",
                          pub_port);
               }
             } else {
