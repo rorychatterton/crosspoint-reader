@@ -24,6 +24,10 @@ constexpr char kCommentBoundaryFixture[] = R"(<html><body><p>before<!--comment--
 constexpr char kProcessingInstructionBoundaryFixture[] = R"(<html><body><p>before<?marker?>after</p></body></html>)";
 constexpr char kCdataBoundaryFixture[] = R"(<html><body><p>before<![CDATA[middle]]>after</p></body></html>)";
 constexpr char kHiddenCdataFixture[] = R"(<html><body><p>before<rp><![CDATA[hidden]]></rp>after</p></body></html>)";
+// Calibre-style XHTML with an HTML5 <meta charset> left unclosed; strict XML
+// rejects it at </head> unless the void tag is closed first.
+constexpr char kUnclosedMetaFixture[] = R"(<?xml version='1.0' encoding='utf-8'?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>T</title><meta charset="utf-8"><link href="s.css" rel="stylesheet"/></head><body><p>First line<br>still first</p><p>Second</p></body></html>)";
 }  // namespace
 
 TEST(KOReaderXPathResolver, ResolvesExactOffsetWithFullAncestry) {
@@ -139,4 +143,12 @@ TEST(KOReaderXPathResolver, KeepsParagraphOnlyResolutionUnchanged) {
 
   EXPECT_EQ(ChapterXPathResolver::findXPathForParagraph(epub, 0, 2),
             "/body/DocFragment[1]/body/div[1]/section[1]/p[2]");
+}
+
+TEST(KOReaderXPathResolver, AcceptsUnclosedVoidElements) {
+  const auto epub = epubWith(kUnclosedMetaFixture);
+
+  EXPECT_EQ(ChapterXPathResolver::findXPathForParagraph(epub, 0, 2), "/body/DocFragment[1]/body/p[2]");
+  EXPECT_EQ(ChapterXPathResolver::findXPathForVisibleTextOffset(epub, 0, 0),
+            "/body/DocFragment[1]/body/p[1]/text()[1].0");
 }
