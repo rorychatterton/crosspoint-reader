@@ -33,6 +33,9 @@ class OpdsBookBrowserActivity final : public CatalogActivity {
   bool injectBack();
 
  private:
+  // Book to download once Wi-Fi is up (a cache-served browse can leave it down).
+  OpdsEntry pendingDownload;
+  void connectThenDownload(const OpdsEntry& book);
   static OpdsBookBrowserActivity* activeInstance;
 
   std::vector<OpdsEntry> entries;

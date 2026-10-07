@@ -18,6 +18,7 @@
 #include "SilentRestart.h"
 #include "TailscaleStore.h"
 #include "activities/RenderLock.h"
+#include "activities/network/WifiSelectionActivity.h"
 #include "components/CatalogScreens.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -500,7 +501,32 @@ void OpdsBookBrowserActivity::openCurrentPath() {
   checkAndConnectWifi();
 }
 
+void OpdsBookBrowserActivity::connectThenDownload(const OpdsEntry& book) {
+  pendingDownload = book;
+  auto wifi = makeUniqueNoThrow<WifiSelectionActivity>(renderer, mappedInput);
+  if (!wifi) {
+    LOG_ERR("OPDS", "OOM: Wi-Fi selection");
+    fail(StrId::STR_MEMORY_ERROR);
+    return;
+  }
+  state = State::WIFI_SELECTION;
+  requestUpdate();
+  startActivityForResult(std::move(wifi), [this](const ActivityResult& result) {
+    if (result.isCancelled) {
+      fail(StrId::STR_WIFI_CONN_FAILED);
+    } else {
+      downloadBook(pendingDownload);
+    }
+  });
+}
+
 void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
+  // A browse served from the SD cache (a resumed boot) can leave Wi-Fi down,
+  // and a DNS lookup before lwIP starts asserts. Connect, then come back.
+  if (!wifiConnected()) {
+    connectThenDownload(book);
+    return;
+  }
   beginDownload(book.title);
 
   // Build full download URL relative to the current feed, not the root server URL
