@@ -406,6 +406,10 @@ void EpubReaderActivity::loop() {
 
   rememberBookOnceRendered();
 
+  // Booted by a tailnet sync that needed a fresh heap: run it again once the
+  // page it syncs from is on screen.
+  if (lastRenderCompleteMs != 0 && consumeKoSyncResume() && launchKOReaderSync()) return;
+
   // Someone else turned the screen while this reader was stacked (the control
   // center's orientation tile). Reflow before the next render, or the page
   // would be drawn with a layout built for the previous frame size.

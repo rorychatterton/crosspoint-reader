@@ -56,11 +56,22 @@ class TailnetSession {
 
   bool isUp() const;
 
+  /** Make the calling task's first-use allocations that are never freed (the
+   * lwIP per-thread semaphore, wolfSSL's global mutexes, newlib's struct tm
+   * buffer). Call before lending the framebuffer: made inside the window they
+   * would stay in its region and block the reclaim. */
+  static void prepareCallerTask();
+
   /** True once microlink_stop() timed out in teardown(): the client tasks are
    * still alive, so the handle cannot be reused before the post-session
    * reboot and every later bring-up fails with TS-E11. Lets the self-test
    * report a deferred stop directly instead of inferring it. */
   bool isStopDeferred() const { return stopDeferred; }
+
+  /** True after ensureUp() failed with TS-E13: a warm start failed and left
+   * the heap too fragmented for the cold retry. The netmap cache is already
+   * cleared, so callers reboot and repeat the action on a fresh heap. */
+  bool needsReboot() const { return lastError == Error::REBOOT_REQUIRED; }
 
   /** Stable, short diagnostic for the last failed tailnet operation. */
   const char* lastErrorCode() const;
@@ -119,8 +130,10 @@ class TailnetSession {
   // Warm start: the control phase (~5 s of a ~7 s page) is skipped when the
   // last cold session's self IP, relay region and peers are cached. Nothing
   // is verified against control, so the peer handshake gets a short budget;
-  // a stale cache costs at most this before the cold path runs instead.
-  static constexpr uint32_t WARM_PEER_READY_MS = 4000;
+  // a stale cache costs at most this before the cold path runs instead. It
+  // covers a lazily configured peer that drops our first initiation and
+  // initiates itself: three relayed round trips before the session can send.
+  static constexpr uint32_t WARM_PEER_READY_MS = 8000;
   static constexpr uint32_t WARM_BRINGUP_TIMEOUT_MS = 12000;
   static constexpr uint32_t PEER_READY_MS = 20000;
   static constexpr uint32_t NETMAP_MAX_AGE_S = 7 * 24 * 3600;
@@ -142,6 +155,7 @@ class TailnetSession {
     PEER_TIMEOUT,
     CLIENT_ERROR,
     RESOLVER_NOT_FOUND,
+    REBOOT_REQUIRED,
   };
   void setError(Error error);
   void writeErrorLog(const char* detail) const;
@@ -179,6 +193,7 @@ class TailnetSession {
   bool sessionConnected = false;
   bool bringUpAndWait(ProgressCallback cb, void* ctx, uint32_t timeoutMs);
   bool bringUpWarmOrCold(ProgressCallback cb, void* ctx, uint32_t timeoutMs);
+  static bool heapAllowsBringUp();
   bool warmEligible(const char*& reason, uint32_t& ageSeconds) const;
   bool warmVerifyPeers();
   const char* warmFailureReason() const;

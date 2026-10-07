@@ -111,9 +111,24 @@ and peer map), ~0.7 s DERP TLS, ~1.2 s two sequential WireGuard handshakes,
   a clean cold session the self IP, relay region and the two peers (with
   their route) are cached; later sessions skip the control plane, start all
   data-plane tasks at once, and initiate both WireGuard handshakes together.
-  Stale cache (peer key rotated, node expired) fails the 4 s handshake
-  budget, logs `Warm start failed (...); cold start`, clears the cache and
-  cold-starts in the same call. Expected bring-up ~2.5 s.
+  The handshake budget is 8 s (`WARM_PEER_READY_MS`): a lazily configured
+  tailscaled peer drops the first initiation and initiates itself, so
+  `microlink_wait_peers_ready()` re-initiates every third of the budget and,
+  when the deadline finds a handshake it answered still unconfirmed, waits
+  up to 3 s more for the peer's first packet (`Peer handshake answered at
+  the ... deadline`). Stale cache (peer key rotated, node expired) fails
+  that budget, logs `Warm start failed (...)`, clears the cache and
+  cold-starts in the same call when the heap still passes the bring-up gate
+  (`Cold start (warm start failed)`). When the failed warm session left the
+  heap too fragmented, the call fails with TS-E13 (`Warm start failed and
+  the heap is too fragmented for a cold start`) instead, and the caller
+  reboots and repeats the action cold: the OPDS browser with
+  `FETCH_PENDING`, KOReader sync by reopening the book and syncing again,
+  KOReader auth by reopening the auth screen. The self-test logs
+  `RESULT=RESTART stage=ensureUp code=TS-E13` and ends the boot there; the
+  driver grades it under `warm_fail_reboot` (WARN, FAIL above a 10 % rate
+  at n >= 10) and keeps it out of the pass-rate gate. Expected bring-up
+  ~2.5 s.
   `[TIMING] control dns= tcp= noise= h2= reg= map= derp_dns= derp_tcp=
   derp_tls= derp_proto= wait= warm= total= ms` is logged once per session.
   Self-test option `poisonNetmapCache` exercises the fallback; the driver
@@ -125,7 +140,9 @@ and peer map), ~0.7 s DERP TLS, ~1.2 s two sequential WireGuard handshakes,
 Verification on the device: `feed_cycles5` should show cycle 1 `Cold start`,
 `Netmap cached`, then `Warm start from cached netmap` with `Tailnet up after`
 well under 3000 ms; a run with `poisonNetmapCache: true` should show one
-`Warm start failed` followed by a cold `Tailnet up after` in the same cycle;
+`Warm start failed` followed by a cold `Tailnet up after` in the same cycle
+(or `RESULT=RESTART` and a cold pass on the next boot when the heap is too
+fragmented);
 `resume` mode plus `CMD:OPDS_OPEN 0` then `CMD:OPDS_BACK` should show
 `Feed served from cache` with no `Starting tailnet session` in between.
 
@@ -321,7 +338,7 @@ STOP_TO   microlink: Stop timed out: tasks still running
 DEFERRED  \[TSN\] Tailnet teardown deferred to reboot
 RECL      SELFTEST fb reclaim=(OK|FAIL) \((\d+) bytes\) free=(\d+) largest=(\d+)
 SURV_HDR  SELFTEST survivors=(\d+) in region
-RESULT    SELFTEST RESULT=(PASS|FAIL)
+RESULT    SELFTEST RESULT=(PASS|FAIL|RESTART)
 PANIC     ^Guru Meditation Error|^abort\(\) was called|^assert failed|Task watchdog got triggered
 ```
 

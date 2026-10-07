@@ -1007,6 +1007,15 @@ err_t wireguardif_peer_is_up(struct netif *netif, u8_t peer_index, ip_addr_t *cu
 	return result;
 }
 
+bool wireguardif_peer_confirm_pending(struct netif *netif, u8_t peer_index) {
+	struct wireguard_peer *peer;
+	if (wireguardif_lookup_peer(netif, peer_index, &peer) != ERR_OK) {
+		return false;
+	}
+	// A responder keypair sits in next_keypair until keypair_update() promotes it
+	return peer->next_keypair.valid && !peer->next_keypair.initiator;
+}
+
 err_t wireguardif_remove_peer(struct netif *netif, u8_t peer_index) {
 	struct wireguard_peer *peer;
 	err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);

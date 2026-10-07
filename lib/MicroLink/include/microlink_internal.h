@@ -579,6 +579,8 @@ void ml_wg_mgr_task(void* arg);
 void ml_wg_mgr_send_cmm(microlink_t* ml, uint32_t peer_vpn_ip);
 esp_err_t ml_wg_mgr_trigger_handshake(microlink_t* ml, uint32_t dest_vpn_ip);
 bool ml_wg_mgr_peer_is_up(microlink_t* ml, uint32_t vpn_ip);
+/* True while a handshake this side answered waits for the peer's first packet. */
+bool ml_wg_mgr_peer_confirm_pending(microlink_t* ml, uint32_t vpn_ip);
 void ml_wg_mgr_update_transport(microlink_t* ml);
 
 /* ml_stun.c */

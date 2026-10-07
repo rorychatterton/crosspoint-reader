@@ -85,6 +85,7 @@ class ActivityManager {
   void goToJoinNetwork();  // File Transfer straight into Join Network (post heap-defrag reboot)
   void goToUsbDrive();
   void goToSettings();
+  void goToKOReaderAuth(bool signUp);  // KOReader auth/sign-up (post heap-defrag reboot)
   void goToFileBrowser(std::string path = {});
   void goToLibrary();
   void goToBrowser();

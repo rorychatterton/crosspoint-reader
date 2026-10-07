@@ -187,6 +187,7 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
     size_t spooled = 0;
     {
       RenderLock lock;
+      TailnetSession::prepareCallerTask();
       renderer.releaseFrameBufferToHeap();
       if (prepareTailnetUrl(url)) {  // ensureUp + rewrite (sets errorMessage on fail)
         LOG_DBG("OPDS", "Fetching: %s", url.c_str());
@@ -201,10 +202,12 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
           state = State::ERROR;
           errorMessage = tr(STR_FETCH_FEED_FAILED);
         }
-      } else if (tailnetRebootAttemptCount() == 0) {
-        // Bring-up refused, typically because earlier fetch cycles left the
-        // heap too fragmented for the tunnel. Retry once from a fresh boot;
-        // a second refusal on a clean heap is reported as the error it is.
+      } else if (TAILNET.needsReboot() || tailnetRebootAttemptCount() == 0) {
+        // Bring-up refused, typically because earlier fetch cycles (or a
+        // failed warm start) left the heap too fragmented for the tunnel.
+        // Retry once from a fresh boot; a second refusal on a clean heap is
+        // reported as the error it is. A failed warm start always retries:
+        // it cleared the netmap cache, so the next boot starts cold.
         spool.close();
         TAILNET.teardown();
         rebootIntoBrowse(ResumeMode::FETCH_PENDING);
@@ -534,6 +537,7 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
   bool started = false;
   {
     RenderLock lock;
+    TailnetSession::prepareCallerTask();
     renderer.releaseFrameBufferToHeap();
     if (prepareTailnetUrl(downloadUrl)) {
       started = true;
@@ -557,9 +561,9 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
         clearBookCache(filename);
         library::markLibraryIndexDirty();
       }
-    } else if (tailnetRebootAttemptCount() == 0) {
+    } else if (TAILNET.needsReboot() || tailnetRebootAttemptCount() == 0) {
       TAILNET.teardown();
-      rebootIntoBrowse(ResumeMode::FETCH_PENDING);  // heap too fragmented: retry from a fresh boot
+      rebootIntoBrowse(ResumeMode::FETCH_PENDING);  // heap too fragmented: retry from a fresh boot (see fetchFeed)
     }
     TAILNET.teardown();
     if (!renderer.reacquireFrameBufferFromHeap()) rebootIntoBrowse(ResumeMode::FETCH_PENDING);

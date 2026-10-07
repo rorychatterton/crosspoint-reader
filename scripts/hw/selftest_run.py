@@ -87,7 +87,14 @@ RX = {
     "TSN_TEARDOWN": re.compile(r"\[TSN\] Tearing down tailnet session"),
     # Warm start (cached netmap) and the one-line bring-up timing summary.
     "WARM_START": re.compile(r"\[TSN\] Warm start from cached netmap age_s=(\d+) self=(\S+) region=(\d+)"),
-    "WARM_FAIL": re.compile(r"\[TSN\] Warm start failed \((.+?)\); cold start"),
+    # Older firmware appended "; cold start" to this line.
+    "WARM_FAIL": re.compile(r"\[TSN\] Warm start failed \((.+?)\)"),
+    # TS-E13: the warm failure left no heap for the in-place cold start; the
+    # UI reboots and repeats the action (the self-test logs RESULT=RESTART).
+    "WARM_REBOOT": re.compile(
+        r"\[TSN\] (TS-E\d\d): Warm start failed and the heap is too fragmented for a cold start "
+        r"\(free=(\d+), maxAlloc=(\d+)\)"
+    ),
     "COLD_START": re.compile(r"\[TSN\] Cold start \((.+?)\)"),
     "NETMAP_CACHED": re.compile(r"\[TSN\] Netmap cached self=(\S+) region=(\d+) peers=(\d+)"),
     "POISONED": re.compile(r"SELFTEST netmap cache poisoned"),
@@ -112,12 +119,13 @@ RX = {
         r"SELFTEST survivor #(\d+) ([UFT]) off=(\d+) size=(\d+)(?: user=(\d+))?(?: task=(\S+))? \|(.*)\| ([0-9a-f ]+)$"
     ),
     "SURV_OLD": re.compile(r"SELFTEST survivor #(\d+) off=(\d+) size=(\d+) first=([0-9a-f]+)"),
-    "RESULT": re.compile(r"SELFTEST RESULT=(PASS|FAIL)(?:\s+(.*))?$"),
+    "RESULT": re.compile(r"SELFTEST RESULT=(PASS|FAIL|RESTART)(?:\s+(.*))?$"),
     "PANIC": re.compile(r"^Guru Meditation Error|^abort\(\) was called|^assert failed|Task watchdog got triggered"),
     "CONFIG": re.compile(r"SELFTEST config fb=(\d+) ballast=(\d+) cycles=(\d+) mode=(\w+) src=(\w+)"),
     "CYCLE": re.compile(r"SELFTEST cycle=(\d+)/(\d+) begin free=(\d+) largest=(\d+)"),
     "BOOT_SUMMARY": re.compile(
         r"SELFTEST BOOT_SUMMARY cycles=(\d+) pass=(\d+) fail=(\d+) first_fail=(-?\d+) deferred_stop=([01])"
+        r"(?: restart=([01]))?"
     ),
     # content_length= is optional: section 4.2 lists it; the firmware may omit it.
     "DL": re.compile(
@@ -192,6 +200,7 @@ def new_record():
         cached_address=False, tunnel_start_free=None, derp_hs_free=None, derp_hs_largest=None, derp_relay=None,
         tunnel_up_ms=None, tunnel_up_free=None, tunnel_up_count=0, tunnel_ups=[],
         warm_start=False, warm_age_s=None, warm_self=None, warm_region=None, warm_fail=None, cold_start=None,
+        warm_reboot_free=None, warm_reboot_largest=None,
         netmap_cached=False, poisoned=False, coord_timing={}, coord_timing_warm=None, coord_total_ms=None,
         coord_control_ms=None,
         tls_ms=None, tls_version=None, tls_suite=None, tls_err=None,
@@ -213,7 +222,8 @@ CSV_COLUMNS = [
     "idx", "boot", "cycle", "cycle_total", "opened_by", "selftest", "kind", "result", "stage", "ts_code",
     "wifi_ms", "fb_bytes", "ballast_got", "free_with_fb", "free_at_release", "largest_at_release",
     "cached_address", "tunnel_start_free", "derp_hs_free", "derp_hs_largest", "tunnel_up_ms", "tunnel_up_free",
-    "tunnel_up_count", "warm_start", "warm_age_s", "warm_fail", "cold_start", "netmap_cached", "poisoned",
+    "tunnel_up_count", "warm_start", "warm_age_s", "warm_fail", "cold_start", "warm_reboot_free",
+    "warm_reboot_largest", "netmap_cached", "poisoned",
     "coord_total_ms", "coord_control_ms", "coord_timing",
     "tls_ms", "tls_version", "tls_suite", "fetch_ok", "fetch_bytes", "fetch_ms", "fetch_free",
     "fetch_largest", "hwm_coord", "hwm_derp_tx", "hwm_net_io", "hwm_wg_mgr", "stop_timeout", "deferred",
@@ -325,6 +335,8 @@ class LogParser:
             add_flag(r, "not_enough_heap")
         if r["warm_fail"]:
             add_flag(r, "warm_fail")
+        if r["ts_code"] == "TS-E13" or r["result"] == "RESTART":
+            add_flag(r, "warm_fail_reboot")
         if r["selftest"] and r["fetch_ok"] is not None:
             r["kind"] = r["kind"] or ("download" if r["dl"] else "feed")
         self.records.append(r)
@@ -470,7 +482,8 @@ class LogParser:
         if m:
             self._ensure_boot()
             self.boot["summary"] = dict(cycles=int(m.group(1)), passed=int(m.group(2)), failed=int(m.group(3)),
-                                        first_fail=int(m.group(4)), deferred_stop=m.group(5) == "1")
+                                        first_fail=int(m.group(4)), deferred_stop=m.group(5) == "1",
+                                        restart=m.group(6) == "1")
             if cur is not None:
                 if self.boot["summary"]["deferred_stop"]:
                     cur["deferred"] = True
@@ -663,6 +676,17 @@ class LogParser:
         m = RX["COLD_START"].search(line)
         if m:
             (cur if cur is not None else self._pending_start).update(cold_start=m.group(1))
+            return
+        m = RX["WARM_REBOOT"].search(line)
+        if m:
+            # Logged after the warm session's teardown, which already closed a
+            # firmware (non-self-test) record on its STACK_HWM line.
+            r = cur
+            if r is None and self.records and self.records[-1]["boot"] == (boot or {}).get("index"):
+                r = self.records[-1]
+            if r is not None:
+                r.update(ts_code=m.group(1), warm_reboot_free=int(m.group(2)), warm_reboot_largest=int(m.group(3)))
+                add_flag(r, "warm_fail_reboot")
             return
         m = RX["WARM_FAIL"].search(line)
         if m:
@@ -964,13 +988,28 @@ def grade(records, boots, scenario, baseline, restore_ok, n_required=10):
         else:
             add("first_fail_shift", "NO_BASELINE", "first_fail=%s" % now)
 
+    # RESULT=RESTART (TS-E13) is the designed recovery from a failed warm
+    # start on a fragmented heap: the UI reboots and repeats the action cold.
+    # Graded on its own rate, and kept out of the pass-rate gate.
+    restarts = [r["idx"] for r in st if r["result"] == "RESTART"]
+    r_rs = len(restarts) / n if n else None
+    if not restarts:
+        add("warm_fail_reboot", "PASS" if n else "NA", "no RESULT=RESTART")
+    else:
+        add("warm_fail_reboot", rate_verdict(True) if r_rs > 0.10 else "WARN",
+            "RESULT=RESTART (TS-E13: warm start failed, heap too fragmented for the in-place cold start; "
+            "the UI reboots and resumes) in %s, rate=%.2f (limit 0.10)" % (restarts, r_rs))
+
     # Gates.
-    passed = sum(1 for r in st if r["result"] == "PASS")
+    gated = [r for r in st if r["result"] != "RESTART"]
+    passed = sum(1 for r in gated if r["result"] == "PASS")
+    n_gate = len(gated)
     if scenario in GATE_SCENARIOS:
-        pr = passed / n if n else 0
-        add("gate_pass_rate", rate_verdict(pr < 0.80) if n else "FAIL", "PASS %d/%d = %.0f%% (need 80%%)" % (passed, n, pr * 100))
+        pr = passed / n_gate if n_gate else 0
+        add("gate_pass_rate", rate_verdict(pr < 0.80) if n_gate else "FAIL",
+            "PASS %d/%d = %.0f%% (need 80%%; %d RESTART excluded)" % (passed, n_gate, pr * 100, len(restarts)))
     elif n:
-        add("gate_pass_rate", "NA", "PASS %d/%d (gate applies to %s)" % (passed, n, ", ".join(GATE_SCENARIOS)))
+        add("gate_pass_rate", "NA", "PASS %d/%d (gate applies to %s)" % (passed, n_gate, ", ".join(GATE_SCENARIOS)))
     if scenario and scenario.startswith("resume"):
         res = [r for r in records if r["kind"] == "resume"]
         bad = [r["idx"] for r in res if not (r["resume_spool"] and r["feed_applied"] and r["rendered"])]
@@ -978,12 +1017,12 @@ def grade(records, boots, scenario, baseline, restore_ok, n_required=10):
             "hop-2 evidence missing in %s" % bad if bad else "%d resume iterations with full evidence" % len(res))
     if scenario == "sync_roundtrip":
         bad = []
-        for r in st:
+        for r in gated:
             ok = (r["tunnel_up_count"] >= 2 and any(200 <= c < 300 for c in r["sync_get"])
                   and any(200 <= c < 300 for c in r["sync_put"]) and not r["forbidden_hits"])
             if not ok:
                 bad.append(r["idx"])
-        add("sync_evidence", "FAIL" if (bad or not st) else "PASS",
+        add("sync_evidence", "FAIL" if (bad or not gated) else "PASS",
             "missing both windows / 2xx get+put / forbidden text in %s" % bad if bad else "all iterations complete")
 
     verdicts = {r["verdict"] for r in rules}
@@ -1006,7 +1045,7 @@ def build_summary(parser, scenario, baseline, restore_ok, extra=None):
     flag_rates = {}
     for f in ("unexpected_reset", "crash", "stall_after_tls", "tls_connect_fail", "deferred_stop", "not_enough_heap",
               "reclaim_fail_survivors", "reclaim_fail_nosurvivors", "wifi_fail", "dl_bad", "fb_not_reclaimable",
-              "warm_fail"):
+              "warm_fail", "warm_fail_reboot"):
         flag_rates[f] = {"count": sum(1 for r in recs if f in r["flags"]), "rate": rate(st, f) if st else rate(recs, f)}
     up = [r["tunnel_up_ms"] for r in recs]
     fm = [r["fetch_ms"] for r in recs]
@@ -1223,7 +1262,7 @@ class Runner:
             raise InfraError("stray capture.py on the Mac (not ours), stop it first: %s" % others)
         if ours:
             log("preflight: killing leftover hw/capture.py: %s" % ours)
-            self.mac.ssh("pkill -f hw/capture.py || true")
+            self.mac.ssh("pkill -f '[h]w/capture[.]py' || true")
             time.sleep(1)
         self.mac.ssh("mkdir -p %s" % REMOTE_DIR, check=True)
 
@@ -1275,7 +1314,7 @@ class Runner:
 
     def capture_start(self):
         self.mac.ssh("cd %s && mv -f run.log run.prev.log 2>/dev/null; rm -f send.txt; : > run.log" % REMOTE_DIR, check=True)
-        cmd = ("cd %s && nohup %s ./capture.py %s run.log --send-file send.txt > capture.out 2>&1 < /dev/null & echo $!"
+        cmd = ("cd %s && nohup %s $HOME/hw/capture.py %s run.log --send-file send.txt > capture.out 2>&1 < /dev/null & echo $!"
                % (REMOTE_DIR, REMOTE_PY, shlex.quote(self.a.port)))
         p = self.mac.ssh(cmd, check=True)
         log("capture: started capture.py pid %s" % p.stdout.strip())
@@ -1298,12 +1337,12 @@ class Runner:
             except Exception:
                 pass
             self.tail = None
-        self.mac.ssh("pkill -f hw/capture.py || true")
+        self.mac.ssh("pkill -f '[h]w/capture[.]py' || true")
         time.sleep(1)
 
     def repulse(self):
         log("silence: re-pulsing RTS via SIGUSR1")
-        self.mac.ssh("pkill -USR1 -f hw/capture.py || true")
+        self.mac.ssh("pkill -USR1 -f '[h]w/capture[.]py' || true")
 
     def send_serial(self, text):
         """Queue bytes for capture.py to write to the port (CMD:REBOOT etc.)."""
@@ -1633,7 +1672,7 @@ def selftest():
     check("cycle2 survivors bytes/phases", (c2["survivors_bytes"], c2["survivors_phases"], c2["survivors_up"]) == (128, "UT", 1))
     check("cycle2 hwm derp_tx 920/4096", c2["hwm"].get("derp_tx") == [920, 4096])
     check("cycle2 reclaim tries 2", c2["reclaim_tries"] == 2, c2["reclaim_tries"])
-    check("boot summary", p.boots[0]["summary"] == dict(cycles=2, passed=0, failed=2, first_fail=1, deferred_stop=False), p.boots[0]["summary"])
+    check("boot summary", p.boots[0]["summary"] == dict(cycles=2, passed=0, failed=2, first_fail=1, deferred_stop=False, restart=False), p.boots[0]["summary"])
     check("boot0 -> boot1 reboot expected (no unexpected_reset)", "unexpected_reset" not in c2["flags"], c2["flags"])
     check("crash record", c3["result"] == "CRASH" and "crash" in c3["flags"] and c3["mepc"] == "0x4200a1c4" and c3["ra"] == "0x4200a0f8",
           (c3["result"], c3["flags"], c3["mepc"], c3["ra"]))
@@ -1654,6 +1693,33 @@ def selftest():
     check("baseline: hwm drop > 512 WARN", v["stack_hwm_vs_baseline"] == "WARN")
     check("baseline: reclaim rate 0.5 > 0+0.15 WARN (n<10)", v["reclaim_fail_rate"] == "WARN", v["reclaim_fail_rate"])
     check("restore_ok True PASS", v["restore_ok"] == "PASS")
+
+    print("fixture synthetic_warm_reboot.log")
+    p = parse_file(os.path.join(fx, "synthetic_warm_reboot.log"), "feed_baseline")
+    check("boots=2", len(p.boots) == 2, len(p.boots))
+    st = [r for r in p.records if r["selftest"] and r["result"] != "INCOMPLETE"]
+    check("two graded iterations", len(st) == 2, [(r["idx"], r["result"]) for r in p.records])
+    w, c = st
+    check("warm iteration RESTART + TS-E13 + stage", (w["result"], w["ts_code"], w["stage"]) == ("RESTART", "TS-E13", "ensureUp"),
+          (w["result"], w["ts_code"], w["stage"]))
+    check("warm iteration flags", "warm_fail" in w["flags"] and "warm_fail_reboot" in w["flags"]
+          and "not_enough_heap" not in w["flags"], w["flags"])
+    check("warm iteration reason + heap", (w["warm_fail"], w["warm_reboot_free"], w["warm_reboot_largest"])
+          == ("no handshake response", 76544, 28660), (w["warm_fail"], w["warm_reboot_free"], w["warm_reboot_largest"]))
+    check("boot summary restart=1", p.boots[0]["summary"]["restart"] is True, p.boots[0]["summary"])
+    check("no unexpected reset across the restart", not any("unexpected_reset" in r["flags"] for r in p.records),
+          [r["flags"] for r in p.records])
+    check("cold iteration after reboot PASS", (c["boot"], c["result"], c["cold_start"]) == (1, "PASS", "no cache"),
+          (c["boot"], c["result"], c["cold_start"]))
+    rules, overall = grade(p.records, p.boots, "feed_baseline", None, None)
+    v = {r["rule"]: r["verdict"] for r in rules}
+    check("rubric warm_fail_reboot WARN (rate 0.5 > 0.10, n<10)", v["warm_fail_reboot"] == "WARN", v["warm_fail_reboot"])
+    check("rubric gate excludes RESTART (1/1 PASS)", v["gate_pass_rate"] == "PASS", v["gate_pass_rate"])
+    check("rubric not_enough_heap_cycle1 PASS", v["not_enough_heap_cycle1"] == "PASS", v["not_enough_heap_cycle1"])
+    check("rubric crash_or_reset PASS", v["crash_or_reset"] == "PASS", v["crash_or_reset"])
+    s = build_summary(p, "feed_baseline", None, None)
+    check("summary counts RESTART", s["counts"].get("RESTART") == 1, s["counts"])
+    check("exit code PASS (no rubric FAIL)", exit_code_for(s) == EXIT_PASS, s["overall"])
 
     print("\n%d checks failed" % len(failures) if failures else "\nall checks passed")
     return 1 if failures else 0

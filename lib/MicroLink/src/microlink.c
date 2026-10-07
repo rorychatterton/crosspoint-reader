@@ -949,19 +949,33 @@ esp_err_t microlink_wait_peers_ready(microlink_t* ml, const uint32_t* vpn_ips, i
   }
 
   uint32_t wait_ms = 0;
-  const uint32_t max_wait = timeout_ms > 0 ? timeout_ms : 15000;
+  uint32_t max_wait = timeout_ms > 0 ? timeout_ms : 15000;
+  const uint32_t retrigger_ms = ml_peer_wait_retrigger_ms(max_wait);
+  bool extended = false;
   for (;;) {
     bool all_up = true;
+    bool confirm_pending = false;
     for (int i = 0; i < count; i++) {
-      if (!ml_wg_mgr_peer_is_up(ml, vpn_ips[i])) all_up = false;
+      if (ml_wg_mgr_peer_is_up(ml, vpn_ips[i])) continue;
+      all_up = false;
+      if (ml_wg_mgr_peer_confirm_pending(ml, vpn_ips[i])) confirm_pending = true;
     }
     if (all_up) return ESP_OK;
-    if (wait_ms >= max_wait) return ESP_ERR_TIMEOUT;
-    vTaskDelay(pdMS_TO_TICKS(500));
-    wait_ms += 500;
-    /* Re-trigger every 5s in case the first handshake initiation dropped
-     * (trigger_handshake is a no-op for a peer whose session is up). */
-    if ((wait_ms % 5000) == 0) {
+    if (wait_ms >= max_wait) {
+      const uint32_t budget = ml_peer_wait_budget_ms(max_wait, confirm_pending, extended);
+      if (budget == max_wait) return ESP_ERR_TIMEOUT;
+      /* Error level so the one-shot diagnostic reaches release logs. */
+      ESP_LOGE(TAG, "Peer handshake answered at the %u ms deadline; waiting up to %u ms for confirmation",
+               (unsigned)max_wait, (unsigned)(budget - max_wait));
+      max_wait = budget;
+      extended = true;
+    }
+    vTaskDelay(pdMS_TO_TICKS(ML_PEER_WAIT_POLL_MS));
+    wait_ms += ML_PEER_WAIT_POLL_MS;
+    /* Re-trigger in case an initiation was dropped (a lazily configured
+     * peer drops the first one); trigger_handshake is a no-op for a peer
+     * whose session is up. */
+    if ((wait_ms % retrigger_ms) == 0) {
       for (int i = 0; i < count; i++) {
         ml_wg_mgr_trigger_handshake(ml, vpn_ips[i]);
         ml_wg_mgr_send_cmm(ml, vpn_ips[i]);

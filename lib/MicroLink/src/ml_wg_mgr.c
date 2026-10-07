@@ -1443,6 +1443,15 @@ bool ml_wg_mgr_peer_is_up(microlink_t *ml, uint32_t vpn_ip) {
     return up;
 }
 
+bool ml_wg_mgr_peer_confirm_pending(microlink_t *ml, uint32_t vpn_ip) {
+    if (!ml || !ml->wg_netif) return false;
+    int idx = find_peer_by_ip(ml, vpn_ip);
+    if (idx < 0) return false;
+    ml_peer_t *p = &ml->peers[idx];
+    if (p->wg_peer_index < 0) return false;
+    return wireguardif_peer_confirm_pending((struct netif *)ml->wg_netif, (u8_t)p->wg_peer_index);
+}
+
 void ml_wg_mgr_update_transport(microlink_t *ml) {
 #if CONFIG_ML_ENABLE_CELLULAR
     if (!ml || !ml->wg_netif) return;

@@ -269,6 +269,9 @@ esp_err_t microlink_wait_peer_ready(microlink_t* ml, uint32_t vpn_ip, uint32_t t
  *
  * Like microlink_wait_peer_ready() but initiates every handshake before
  * waiting, so relayed round trips overlap instead of running back to back.
+ * Re-initiates every third of the budget (1.5-5 s), and when the deadline
+ * finds a handshake the peer initiated already answered, waits up to
+ * ML_PEER_WAIT_CONFIRM_GRACE_MS more for the peer's confirming packet.
  * On timeout use microlink_peer_is_up() to see which peers did answer.
  * (CrossPoint fork.)
  */

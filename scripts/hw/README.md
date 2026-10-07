@@ -171,6 +171,13 @@ the log text:
   `SELFTEST dl rep=` line, two new-format survivors (`U`/`T`, `user=`,
   `task=`), `BOOT_SUMMARY`, an expected reboot, then a Guru Meditation with
   MEPC/RA and a `RTC_SW_SYS_RST` reboot (crash record, exit code 3).
+- `fixtures/synthetic_warm_reboot.log` (hand-built from the firmware format
+  strings): a warm start whose handshake is answered at the deadline but
+  never confirmed, `Warm start failed (no handshake response)`, then
+  TS-E13 (`heap is too fragmented for a cold start`, free=76544
+  maxAlloc=28660), `RESULT=RESTART`, `BOOT_SUMMARY ... restart=1` and a
+  reboot into a cold cycle that passes. Graded `warm_fail_reboot` WARN, with
+  the RESTART kept out of `gate_pass_rate`.
 
 ## Adding a scenario
 

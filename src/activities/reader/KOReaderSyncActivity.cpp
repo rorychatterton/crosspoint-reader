@@ -761,6 +761,7 @@ bool KOReaderSyncActivity::overTailnet(void (KOReaderSyncActivity::*op)()) {
   bool up = false;
   {
     RenderLock lock;
+    TailnetSession::prepareCallerTask();
     renderer.releaseFrameBufferToHeap();
     LOG_INF("KOSync", "tailnet window released free=%u largest=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
     if (TAILNET.ensureUp() && !(baseUrl = TAILNET.rewriteUrlForTailnet(baseUrl)).empty()) {
@@ -785,6 +786,13 @@ bool KOReaderSyncActivity::overTailnet(void (KOReaderSyncActivity::*op)()) {
       silentRestartToReader(/*paint=*/false);
       for (;;) delay(1000);  // ESP.restart() does not return
     }
+  }
+  if (!up && TAILNET.needsReboot()) {
+    // A failed warm start left no room for the cold one; the reader reopens
+    // after the reboot and runs the sync again, cold. Returns only when
+    // sleep supersedes the reboot, and then the error is shown below.
+    LOG_ERR("KOSync", "Tailnet needs a fresh heap; rebooting to repeat the sync");
+    silentRestartToReaderSync();
   }
   if (!up) {
     {

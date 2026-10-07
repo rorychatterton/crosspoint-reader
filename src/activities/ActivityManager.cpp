@@ -25,6 +25,7 @@
 #include "network/UsbDriveActivity.h"
 #include "plugins/PluginCatalogActivity.h"
 #include "reader/ReaderActivity.h"
+#include "settings/KOReaderAuthActivity.h"
 #include "settings/OpdsServerListActivity.h"
 #include "settings/SettingsActivity.h"
 #include "util/BmpViewerActivity.h"
@@ -272,6 +273,17 @@ void ActivityManager::goToUsbDrive() {
 }
 
 void ActivityManager::goToSettings() { replaceActivity(std::make_unique<SettingsActivity>(renderer, mappedInput)); }
+
+void ActivityManager::goToKOReaderAuth(const bool signUp) {
+  auto activity = makeUniqueNoThrow<KOReaderAuthActivity>(
+      renderer, mappedInput, signUp ? KOReaderAuthActivity::Mode::SIGN_UP : KOReaderAuthActivity::Mode::AUTHENTICATE);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: KOReader auth activity");
+    goHome();
+    return;
+  }
+  replaceActivity(std::move(activity));
+}
 
 void ActivityManager::goToFileBrowser(std::string path) {
   replaceActivity(std::make_unique<FileBrowserActivity>(renderer, mappedInput, std::move(path)));

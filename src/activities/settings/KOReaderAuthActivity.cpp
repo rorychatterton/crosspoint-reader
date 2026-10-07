@@ -85,6 +85,7 @@ bool KOReaderAuthActivity::overTailnet(KOReaderSyncClient::Error& result) {
   bool up = false;
   {
     RenderLock lock;
+    TailnetSession::prepareCallerTask();
     renderer.releaseFrameBufferToHeap();
     LOG_INF("KOAuth", "tailnet window released free=%u largest=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
     if (TAILNET.ensureUp() && !(baseUrl = TAILNET.rewriteUrlForTailnet(baseUrl)).empty()) {
@@ -109,6 +110,13 @@ bool KOReaderAuthActivity::overTailnet(KOReaderSyncClient::Error& result) {
       silentRestart(/*paint=*/false);
       for (;;) delay(1000);  // ESP.restart() does not return
     }
+  }
+  if (!up && TAILNET.needsReboot()) {
+    // A failed warm start left no room for the cold one; this screen reopens
+    // after the reboot and repeats the request, cold. Returns only when
+    // sleep supersedes the reboot, and then the error is shown below.
+    LOG_ERR("KOAuth", "Tailnet needs a fresh heap; rebooting to repeat the request");
+    silentRestartToKOReaderAuth(mode == Mode::SIGN_UP);
   }
   if (!up) {
     {

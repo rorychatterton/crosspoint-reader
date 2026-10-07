@@ -40,6 +40,8 @@ const char* TailnetSession::lastErrorCode() const {
       return "TS-E11";
     case Error::RESOLVER_NOT_FOUND:
       return "TS-E12";
+    case Error::REBOOT_REQUIRED:
+      return "TS-E13";
   }
   return "TS-E00";
 }
@@ -73,6 +75,8 @@ const char* TailnetSession::lastErrorMessage() const {
       return "Tailscale client entered an error state";
     case Error::RESOLVER_NOT_FOUND:
       return "Tailnet DNS server is not visible to this device";
+    case Error::REBOOT_REQUIRED:
+      return "Tailscale needs a restart to free memory for a full reconnect";
   }
   return "Unknown Tailscale error";
 }
@@ -114,8 +118,10 @@ void TailnetSession::writeStartupLog() const {
 #include <esp_netif.h>
 #include <lwip/dns.h>
 #include <lwip/inet.h>
+#include <lwip/sys.h>
 #include <lwip/tcpip.h>
 #include <microlink.h>
+#include <wolfssl/ssl.h>
 
 #include <algorithm>
 #include <ctime>
@@ -226,7 +232,7 @@ bool TailnetSession::startBringUp(const uint32_t timeoutMs) {
     return false;
   }
 
-  if (ESP.getFreeHeap() < MIN_TAILNET_FREE_HEAP || ESP.getMaxAllocHeap() < MIN_TAILNET_MAX_ALLOC) {
+  if (!heapAllowsBringUp()) {
     setError(Error::LOW_MEMORY);
     LOG_ERR(TAG, "Not enough heap for tailnet session (free=%u, maxAlloc=%u)", ESP.getFreeHeap(),
             ESP.getMaxAllocHeap());
@@ -338,7 +344,8 @@ bool TailnetSession::setTargetUrl(const std::string& url) {
   if (targetPeerIp == 0 && microlink_parse_ip(host.c_str()) == 0 && !TAILSCALE_STORE.getDnsServer().empty()) {
     resolverIp = microlink_parse_ip(TAILSCALE_STORE.getDnsServer().c_str());
     if (!isCgnatIp(resolverIp)) {
-      LOG_ERR(TAG, "Tailnet DNS server '%s' is not a tailnet address; ignoring", TAILSCALE_STORE.getDnsServer().c_str());
+      LOG_ERR(TAG, "Tailnet DNS server '%s' is not a tailnet address; ignoring",
+              TAILSCALE_STORE.getDnsServer().c_str());
       resolverIp = 0;
     } else {
       const std::string cached = TAILSCALE_STORE.getDnsCacheIp(host);
@@ -466,9 +473,22 @@ bool TailnetSession::ensureUp(const ProgressCallback cb, void* ctx, const uint32
   return up;
 }
 
+void TailnetSession::prepareCallerTask() {
+  static bool wolfSslReady = false;
+  if (!wolfSslReady) wolfSslReady = wolfSSL_Init() == WOLFSSL_SUCCESS;
+  sys_thread_sem_get();
+  const time_t now = time(nullptr);
+  gmtime(&now);
+}
+
+bool TailnetSession::heapAllowsBringUp() {
+  return ESP.getFreeHeap() >= MIN_TAILNET_FREE_HEAP && ESP.getMaxAllocHeap() >= MIN_TAILNET_MAX_ALLOC;
+}
+
 // Warm start when the previous cold session's netmap is cached and still
-// plausible; on any warm failure fall back to the cold path within the same
-// call, so callers never see the difference beyond the elapsed time.
+// plausible. On a warm failure the cold path runs within the same call when
+// the heap still passes the bring-up gate; otherwise the call fails with
+// TS-E13 and the caller reboots, which brings the action back up cold.
 bool TailnetSession::bringUpWarmOrCold(const ProgressCallback cb, void* ctx, const uint32_t timeoutMs) {
   const unsigned long started = millis();
   const char* reason = nullptr;
@@ -484,7 +504,7 @@ bool TailnetSession::bringUpWarmOrCold(const ProgressCallback cb, void* ctx, con
       failure = "no handshake response";
     }
     if (!failure) return true;
-    LOG_ERR(TAG, "Warm start failed (%s); cold start", failure);
+    LOG_ERR(TAG, "Warm start failed (%s)", failure);
     // teardown() clears the cache when lastError is set; a handshake miss
     // leaves it NONE, so clear explicitly either way.
     teardown();
@@ -499,6 +519,22 @@ bool TailnetSession::bringUpWarmOrCold(const ProgressCallback cb, void* ctx, con
       if (cb) cb(ctx, Status::FAILED);
       return false;
     }
+    // Frees queued on the tcpip/WiFi tasks can land after teardown returns.
+    for (int attempt = 0; attempt < 5 && !heapAllowsBringUp(); attempt++) vTaskDelay(pdMS_TO_TICKS(200));
+    if (!heapAllowsBringUp()) {
+      // The failed warm session fragmented the heap; a cold start here would
+      // be refused (TS-E03) and could leave the framebuffer unreclaimable.
+      setError(Error::REBOOT_REQUIRED);
+      LOG_ERR(TAG, "%s: Warm start failed and the heap is too fragmented for a cold start (free=%u, maxAlloc=%u)",
+              lastErrorCode(), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+      char detail[96];
+      snprintf(detail, sizeof(detail), "warm_start_failed=1 free_heap=%u max_alloc=%u", ESP.getFreeHeap(),
+               ESP.getMaxAllocHeap());
+      writeErrorLog(detail);
+      if (cb) cb(ctx, Status::FAILED);
+      return false;
+    }
+    LOG_INF(TAG, "Cold start (warm start failed)");
   } else {
     LOG_INF(TAG, "Cold start (%s)", reason);
   }
@@ -908,6 +944,8 @@ bool TailnetSession::ensureUp(const ProgressCallback cb, void* ctx, uint32_t) {
 }
 
 bool TailnetSession::isUp() const { return false; }
+
+void TailnetSession::prepareCallerTask() {}
 
 bool TailnetSession::setTargetUrl(const std::string&) { return false; }
 

@@ -106,6 +106,9 @@ assembly), `example/`, `CMakeLists.txt`.
   for every WG DATA packet, in lwIP context) routed through the existing
   `WG_DEBUG` macro (compiled out unless `WG_DEBUG_LOGGING` set to 1).
   Handshake-event printfs left as upstream.
+- `src/wireguardif.{c,h}`: `wireguardif_peer_confirm_pending()` reports a
+  responder keypair waiting in `next_keypair` for the initiator's first
+  packet (the session cannot send until then).
 
 ## Behavioral limits accepted for this target
 
@@ -357,17 +360,26 @@ assembly), `example/`, `CMakeLists.txt`.
     and resolver must be cached); `microlink_wait_peers_ready()` initiates
     every handshake before waiting so the two relayed round trips overlap
     (`microlink_wait_peer_ready()` is now the count-1 wrapper);
-    `microlink_peer_is_up()` tells which peer answered.
+    `microlink_peer_is_up()` tells which peer answered. It re-initiates
+    every third of its budget (1.5-5 s, `ml_peer_wait_retrigger_ms()`),
+    and when the deadline finds a
+    handshake the peer initiated already answered
+    (`ml_wg_mgr_peer_confirm_pending()`), it waits once more for up to
+    `ML_PEER_WAIT_CONFIRM_GRACE_MS` (3 s). A lazily configured tailscaled
+    peer drops our first initiation and initiates itself, so the warm
+    budget would otherwise expire one relayed round trip short.
   - Staleness fallback lives in the reader (`TailnetSession`): warm only
     when the store cache is valid, the cold start is at most 7 days old
     (or the clock was unset when cached), and the peers are in NVS; a
-    warm session must answer a WireGuard handshake within 4 s
+    warm session must answer a WireGuard handshake within 8 s
     (`WARM_PEER_READY_MS`) instead of the 20 s TS-E10 budget. A cache
     miss ends the session in `ML_STATE_ERROR` ("warm start: ... not in
     NVS cache"), a stale key or region shows as no handshake response;
-    either way the reader logs `[TSN] Warm start failed (...); cold
-    start`, tears down, clears the store cache and runs the cold path in
-    the same `ensureUp()` call. A cold session that reached CONNECTED
+    either way the reader logs `[TSN] Warm start failed (...)`, tears
+    down, clears the store cache and runs the cold path in the same
+    `ensureUp()` call, unless the heap no longer passes the bring-up gate:
+    then `ensureUp()` fails with TS-E13 and the caller reboots and repeats
+    the action, cold. A cold session that reached CONNECTED
     without a TS-E error re-caches at teardown; any TS-E error at
     teardown clears the cache. `microlink_peer_cache_poison()` flips one
     key byte for the self-test's `poisonNetmapCache` scenario.

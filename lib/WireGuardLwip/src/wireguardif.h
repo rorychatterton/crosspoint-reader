@@ -133,6 +133,10 @@ err_t wireguardif_disconnect(struct netif *netif, u8_t peer_index);
 // Is the given peer "up"? A peer is up if it has a valid session key it can communicate with
 err_t wireguardif_peer_is_up(struct netif *netif, u8_t peer_index, ip_addr_t *current_ip, u16_t *current_port);
 
+// True while a session from a handshake this side answered (as responder) waits
+// for the initiator's first packet; only that packet makes it usable for sending
+bool wireguardif_peer_confirm_pending(struct netif *netif, u8_t peer_index);
+
 // Register a DERP relay output callback for peers without direct endpoints
 // This callback is invoked when a WireGuard packet needs to be sent to a peer
 // that has no direct IP endpoint (ip is 0.0.0.0 or port is 0)

@@ -12,6 +12,15 @@
 void silentRestart(bool paint = true);            // home screen
 void silentRestartToReader(bool paint = true);    // currently-open EPUB (APP_STATE.openEpubPath)
 void silentRestartToSettings(bool paint = true);  // settings screen
+// Reopen the current EPUB and start KOReader sync again once it has loaded:
+// a tailnet sync that needs a fresh heap (TailnetSession::needsReboot())
+// repeats itself after the reboot. consumeKoSyncResume() is the reader's
+// one-shot check.
+void silentRestartToReaderSync(bool paint = true);
+bool consumeKoSyncResume();
+// Reopen KOReader auth (or sign-up) and run the request again, for the same
+// reason.
+void silentRestartToKOReaderAuth(bool signUp, bool paint = true);
 // Reboot into the File Transfer > Join Network flow on a pristine heap, so the
 // WiFi + TLS working set has the contiguous RAM it needs on tight boards. A
 // no-op on touch boards (a soft reset would cycle their externally-powered

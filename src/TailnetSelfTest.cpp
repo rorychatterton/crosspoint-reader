@@ -28,12 +28,12 @@
 #include "CrossPointState.h"
 #include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
+#include "SilentRestart.h"
 #include "TailscaleStore.h"
 #include "WifiCredentialStore.h"
+#include "activities/browser/OpdsBookBrowserActivity.h"
 #include "network/HttpDownloader.h"
 #include "network/TailnetSession.h"
-#include "SilentRestart.h"
-#include "activities/browser/OpdsBookBrowserActivity.h"
 
 // Build-flag defaults. Every one of them can be overridden per run from
 // /.crosspoint/selftest.json (see loadConfig) without reflashing.
@@ -214,9 +214,9 @@ struct KnownTask {
   TaskHandle_t handle;
 };
 // Boot-time residents first, then the tunnel's tasks (exist only while it is up).
-KnownTask knownTasks[] = {{"tcpip_thread", nullptr}, {"wifi", nullptr},       {"loopTask", nullptr},
-                          {"sys_evt", nullptr},      {"ml_coord", nullptr},   {"ml_derp_tx", nullptr},
-                          {"ml_net_io", nullptr},    {"ml_udp_rx", nullptr},  {"ml_wg_mgr", nullptr}};
+KnownTask knownTasks[] = {{"tcpip_thread", nullptr}, {"wifi", nullptr},      {"loopTask", nullptr},
+                          {"sys_evt", nullptr},      {"ml_coord", nullptr},  {"ml_derp_tx", nullptr},
+                          {"ml_net_io", nullptr},    {"ml_udp_rx", nullptr}, {"ml_wg_mgr", nullptr}};
 constexpr unsigned kBootTaskCount = 4;
 constexpr unsigned kKnownTaskCount = sizeof(knownTasks) / sizeof(knownTasks[0]);
 
@@ -331,19 +331,22 @@ void dumpSurvivors(const uintptr_t lo, const uintptr_t hi) {
 struct Window {
   uintptr_t lo = 0, hi = 0;  // the freed framebuffer region (0,0 when the model is not held)
   bool released = false;
-  bool up = false;     // ensureUp succeeded
-  bool ready = false;  // and the URL rewrote
-  std::string url;     // rewritten URL; freed by closeWindow before teardown
+  bool up = false;       // ensureUp succeeded
+  bool ready = false;    // and the URL rewrote
+  bool restart = false;  // ensureUp asked for a reboot (TS-E13); the UI reboots and repeats the action
+  std::string url;       // rewritten URL; freed by closeWindow before teardown
 };
 
-// Returns false after logging a RESULT=FAIL line for the stage that refused;
-// the caller must still closeWindow() so a released framebuffer is reclaimed.
+// Returns false after logging a RESULT=FAIL (or RESULT=RESTART) line for the
+// stage that refused; the caller must still closeWindow() so a released
+// framebuffer is reclaimed.
 bool openWindow(const Config& cfg, Model& model, const std::string& url, Window& w) {
   // Target set BEFORE the release by default: the session keeps the host
   // string past teardown, and it must not sit inside the framebuffer's
   // region. setTargetAfterRelease=true sets it after the release instead, to
   // reproduce that fault.
   if (!cfg.setTargetAfterRelease) TAILNET.setTargetUrl(url);
+  TailnetSession::prepareCallerTask();
   if (model.fb) {
     // Free the modeled framebuffer to the heap for the tunnel + fetch, exactly
     // as the UI does. From here the panel would show its last painted frame.
@@ -357,8 +360,9 @@ bool openWindow(const Config& cfg, Model& model, const std::string& url, Window&
   if (cfg.setTargetAfterRelease) TAILNET.setTargetUrl(url);
   if (cfg.poisonNetmapCache && TAILNET.poisonNetmapCache()) LOG_ERR(TAG, "SELFTEST netmap cache poisoned");
   if (!TAILNET.ensureUp()) {
-    LOG_ERR(TAG, "SELFTEST RESULT=FAIL stage=ensureUp code=%s msg=%s", TAILNET.lastErrorCode(),
-            TAILNET.lastErrorMessage());
+    w.restart = TAILNET.needsReboot();
+    LOG_ERR(TAG, "SELFTEST RESULT=%s stage=ensureUp code=%s msg=%s", w.restart ? "RESTART" : "FAIL",
+            TAILNET.lastErrorCode(), TAILNET.lastErrorMessage());
     return false;
   }
   w.up = true;
@@ -430,14 +434,20 @@ bool urlHost(const std::string& url, char* out, const size_t outLen) {
   return true;
 }
 
+// RESTART: the cycle stopped where the UI would reboot and repeat the action
+// (RESULT=RESTART already logged); the boot ends there.
+enum class CycleResult : uint8_t { PASS, FAIL, RESTART };
+
+CycleResult verdict(const bool pass) { return pass ? CycleResult::PASS : CycleResult::FAIL; }
+
 // ---------------------------------------------------------------------------
 // Feed mode: the real OPDS fetch over the tunnel (first tailnet-enabled OPDS
 // server, full prepareTailnetUrl flow, HTTPS GET spooled to SD).
-bool runFeedCycle(const Config& cfg, Model& model) {
+CycleResult runFeedCycle(const Config& cfg, Model& model) {
   const OpdsServer* server = firstTailnetServer();
   if (!server) {
     LOG_ERR(TAG, "SELFTEST RESULT=FAIL stage=no-tailnet-opds-server");
-    return false;
+    return CycleResult::FAIL;
   }
   std::string url = server->url;
   if (url.find("/opds") == std::string::npos) {
@@ -471,7 +481,7 @@ bool runFeedCycle(const Config& cfg, Model& model) {
   const CloseResult cr = closeWindow(cfg, model, w);
   if (!w.ready) {
     Storage.remove(kSpool);
-    return false;  // RESULT=FAIL already logged by openWindow
+    return w.restart ? CycleResult::RESTART : CycleResult::FAIL;  // RESULT already logged by openWindow
   }
   // Read the spool back post-reclaim (the UI parses it here), then drop it.
   size_t readBack = 0;
@@ -485,7 +495,7 @@ bool runFeedCycle(const Config& cfg, Model& model) {
   LOG_ERR(TAG, "SELFTEST spool readback=%u free=%u largest=%u", (unsigned)readBack, freeNow(), largestNow());
   const bool pass = ok && cr.reclaimed && readBack == bodyBytes;
   LOG_ERR(TAG, "SELFTEST RESULT=%s", pass ? "PASS" : "FAIL");
-  return pass;
+  return verdict(pass);
 }
 
 // ---------------------------------------------------------------------------
@@ -524,10 +534,10 @@ bool md5File(const char* path, size_t& bytes, char* hexOut /* 33 bytes */) {
   return true;
 }
 
-bool runDownloadCycle(const Config& cfg, Model& model, const unsigned rep) {
+CycleResult runDownloadCycle(const Config& cfg, Model& model, const unsigned rep) {
   if (cfg.downloadUrl.empty()) {
     LOG_ERR(TAG, "SELFTEST RESULT=FAIL stage=config msg=downloadUrl missing (selftest.json)");
-    return false;
+    return CycleResult::FAIL;
   }
   // Reuse the OPDS store's tailnet credentials when the download is served by
   // that host (Calibre); the plain http.server / self-signed variants need none.
@@ -568,11 +578,11 @@ bool runDownloadCycle(const Config& cfg, Model& model, const unsigned rep) {
         },
         nullptr, authUser, authPass);
     secs = (millis() - p.start) / 1000;
-    LOG_ERR(TAG, "SELFTEST dl done result=%d secs=%u minfree=%u free=%u largest=%u", result, secs,
-            (unsigned)p.minFree, freeNow(), largestNow());
+    LOG_ERR(TAG, "SELFTEST dl done result=%d secs=%u minfree=%u free=%u largest=%u", result, secs, (unsigned)p.minFree,
+            freeNow(), largestNow());
   }
   const CloseResult cr = closeWindow(cfg, model, w);
-  if (!w.ready) return false;  // RESULT=FAIL already logged by openWindow
+  if (!w.ready) return w.restart ? CycleResult::RESTART : CycleResult::FAIL;  // RESULT already logged by openWindow
 
   char md5[33];
   const bool haveFile = md5File(kDownloadPath, downloaded, md5);
@@ -588,7 +598,7 @@ bool runDownloadCycle(const Config& cfg, Model& model, const unsigned rep) {
   Storage.remove(kDownloadPath);
   const bool pass = result == HttpDownloader::OK && sizeOk && fileOk && cr.reclaimed;
   LOG_ERR(TAG, "SELFTEST RESULT=%s mode=download rep=%u", pass ? "PASS" : "FAIL", rep);
-  return pass;
+  return verdict(pass);
 }
 
 // ---------------------------------------------------------------------------
@@ -606,14 +616,14 @@ std::string hashFor(const std::string& path, const DocumentMatchMethod m) {
                                             : KOReaderDocumentId::calculate(path);
 }
 
-bool runSyncCycle(const Config& cfg, Model& model, const unsigned iter) {
+CycleResult runSyncCycle(const Config& cfg, Model& model, const unsigned iter) {
   const bool creds = KOREADER_STORE.hasCredentials();
   std::string baseUrl = KOREADER_STORE.getBaseUrl();
-  LOG_ERR(TAG, "SELFTEST sync creds=%d useTailnet=%d authKey=%d base=%s free=%u", creds,
-          KOREADER_STORE.getUseTailnet(), TAILSCALE_STORE.hasAuthKey(), baseUrl.c_str(), freeNow());
+  LOG_ERR(TAG, "SELFTEST sync creds=%d useTailnet=%d authKey=%d base=%s free=%u", creds, KOREADER_STORE.getUseTailnet(),
+          TAILSCALE_STORE.hasAuthKey(), baseUrl.c_str(), freeNow());
   if (!creds) {
     LOG_ERR(TAG, "SELFTEST RESULT=FAIL stage=sync-credentials");
-    return false;
+    return CycleResult::FAIL;
   }
   // Book: the open EPUB, else the most recent, else a build flag. Both hashes
   // are computed here, before the release, because they read the EPUB from SD.
@@ -626,7 +636,8 @@ bool runSyncCycle(const Config& cfg, Model& model, const unsigned iter) {
   if (!book.empty()) {
     const DocumentMatchMethod pm = KOREADER_STORE.getMatchMethod();
     primary = hashFor(book, pm);
-    alt = hashFor(book, pm == DocumentMatchMethod::FILENAME ? DocumentMatchMethod::BINARY : DocumentMatchMethod::FILENAME);
+    alt = hashFor(book,
+                  pm == DocumentMatchMethod::FILENAME ? DocumentMatchMethod::BINARY : DocumentMatchMethod::FILENAME);
   }
   const std::string synthetic = KOReaderDocumentId::calculateFromFilename(kSyntheticName);
   LOG_ERR(TAG, "SELFTEST sync book=%s primary=%s alt=%s synthetic=%s free=%u", book.empty() ? "-" : book.c_str(),
@@ -676,6 +687,7 @@ bool runSyncCycle(const Config& cfg, Model& model, const unsigned iter) {
     KOReaderSyncClient::clearBaseUrlOverride();
   }
   const CloseResult ca = closeWindow(cfg, model, a);
+  if (a.restart) return CycleResult::RESTART;  // the UI reboots here; window B would only meet TS-E03
 
   // Window B: write the synthetic record, read it back, assert.
   Window b;
@@ -715,15 +727,16 @@ bool runSyncCycle(const Config& cfg, Model& model, const unsigned iter) {
       KOReaderSyncClient::clearBaseUrlOverride();
     }
     cb = closeWindow(cfg, model, b);
+    if (b.restart) return CycleResult::RESTART;
   }
   const bool pass = a.ready && b.ready && rt && !netErr && ca.reclaimed && cb.reclaimed && !ca.deferred && !cb.deferred;
-  LOG_ERR(TAG, "SELFTEST RESULT=%s mode=sync iters=%u upA=%d upB=%d rt=%d reclaimA=%d reclaimB=%d neterr=%d deferred=%d",
-          pass ? "PASS" : "FAIL", iter + 1, a.up, b.up, rt, ca.reclaimed, cb.reclaimed, netErr,
-          ca.deferred || cb.deferred);
-  return pass;
+  LOG_ERR(
+      TAG, "SELFTEST RESULT=%s mode=sync iters=%u upA=%d upB=%d rt=%d reclaimA=%d reclaimB=%d neterr=%d deferred=%d",
+      pass ? "PASS" : "FAIL", iter + 1, a.up, b.up, rt, ca.reclaimed, cb.reclaimed, netErr, ca.deferred || cb.deferred);
+  return verdict(pass);
 }
 
-bool runCycle(const Config& cfg, Model& model, const unsigned idx) {
+CycleResult runCycle(const Config& cfg, Model& model, const unsigned idx) {
   switch (cfg.mode) {
     case Mode::DOWNLOAD:
       return runDownloadCycle(cfg, model, idx + 1);
@@ -735,9 +748,9 @@ bool runCycle(const Config& cfg, Model& model, const unsigned idx) {
 }
 
 void logBootSummary(const Config& cfg, const unsigned pass, const unsigned fail, const int firstFail,
-                    const bool deferred) {
-  LOG_ERR(TAG, "SELFTEST BOOT_SUMMARY cycles=%u pass=%u fail=%u first_fail=%d deferred_stop=%d", (unsigned)cfg.cycles,
-          pass, fail, firstFail, deferred);
+                    const bool deferred, const bool restart) {
+  LOG_ERR(TAG, "SELFTEST BOOT_SUMMARY cycles=%u pass=%u fail=%u first_fail=%d deferred_stop=%d restart=%d",
+          (unsigned)cfg.cycles, pass, fail, firstFail, deferred, restart);
 }
 
 void delaySeconds(const uint32_t ms) {
@@ -786,17 +799,24 @@ void runTailnetSelfTest() {
   unsigned pass = 0, fail = 0;
   int firstFail = 0;  // 1-based cycle of the first FAIL; 0 = none
   bool deferred = false;
+  bool restart = false;
   for (unsigned i = 0; i < cfg.cycles; i++) {
-    LOG_ERR(TAG, "SELFTEST cycle=%u/%u begin free=%u largest=%u", i + 1, (unsigned)cfg.cycles, freeNow(),
-            largestNow());
+    LOG_ERR(TAG, "SELFTEST cycle=%u/%u begin free=%u largest=%u", i + 1, (unsigned)cfg.cycles, freeNow(), largestNow());
     // A failed cycle (refused bring-up, failed reclaim, ...) does not end the
     // boot: the next cycle runs in whatever state this one left, which is the
     // fragmented state the UI reaches.
-    if (runCycle(cfg, model, i)) {
+    const CycleResult result = runCycle(cfg, model, i);
+    if (result == CycleResult::PASS) {
       pass++;
-    } else {
+    } else if (result == CycleResult::FAIL) {
       fail++;
       if (!firstFail) firstFail = static_cast<int>(i + 1);
+    } else {
+      // The UI reboots and repeats the action here; so does the self-test
+      // (the next boot starts cold: the warm failure cleared the cache).
+      restart = true;
+      LOG_ERR(TAG, "SELFTEST restart required; skipping %u remaining cycles", (unsigned)(cfg.cycles - i - 1));
+      break;
     }
     if (TAILNET.isStopDeferred()) {
       // The client tasks are still alive; the handle cannot be reused until
@@ -811,12 +831,14 @@ void runTailnetSelfTest() {
       delaySeconds(cfg.interCycleDelayMs);
     }
   }
-  logBootSummary(cfg, pass, fail, firstFail, deferred);
+  logBootSummary(cfg, pass, fail, firstFail, deferred, restart);
   if (!TAILNET.isStopDeferred()) TAILNET.teardown();
   if (cfg.resumeMode >= 0) {
     // Hop 1: carry the spool (mode 1) or a pending/failed fetch (2/0) into the
-    // real browser exactly as rebootIntoBrowse() does, without painting.
-    const auto mode = static_cast<OpdsBookBrowserActivity::ResumeMode>(cfg.resumeMode);
+    // real browser exactly as rebootIntoBrowse() does, without painting. A
+    // restart hands over a pending fetch, as the browser does on TS-E13.
+    const auto mode = restart ? OpdsBookBrowserActivity::ResumeMode::FETCH_PENDING
+                              : static_cast<OpdsBookBrowserActivity::ResumeMode>(cfg.resumeMode);
     if (mode != OpdsBookBrowserActivity::ResumeMode::SPOOLED && Storage.exists(kSpool)) Storage.remove(kSpool);
     const bool sidecar = OpdsBookBrowserActivity::writeResumeSidecar(mode, "", {});
     uint32_t index = 0;
@@ -827,7 +849,7 @@ void runTailnetSelfTest() {
         break;
       }
     }
-    LOG_ERR(TAG, "SELFTEST resume hop=1 mode=%u idx=%u sidecar=%d spool=%d", (unsigned)cfg.resumeMode,
+    LOG_ERR(TAG, "SELFTEST resume hop=1 mode=%u idx=%u sidecar=%d spool=%d", static_cast<unsigned>(mode),
             (unsigned)index, sidecar ? 1 : 0, Storage.exists(kSpool) ? 1 : 0);
     delaySeconds(500);
     silentRestartToOpds(index, /*paint=*/false);

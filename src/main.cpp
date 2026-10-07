@@ -152,7 +152,10 @@ constexpr uint32_t SILENT_REBOOT_TARGET_READER = 1;
 constexpr uint32_t SILENT_REBOOT_TARGET_SETTINGS = 2;
 constexpr uint32_t SILENT_REBOOT_TARGET_JOIN_NETWORK = 3;
 constexpr uint32_t SILENT_REBOOT_TARGET_OPDS = 4;
-constexpr uint32_t SILENT_REBOOT_TARGET_MAX = SILENT_REBOOT_TARGET_OPDS;
+constexpr uint32_t SILENT_REBOOT_TARGET_READER_KOSYNC = 5;
+constexpr uint32_t SILENT_REBOOT_TARGET_KOREADER_AUTH = 6;
+constexpr uint32_t SILENT_REBOOT_TARGET_KOREADER_SIGN_UP = 7;
+constexpr uint32_t SILENT_REBOOT_TARGET_MAX = SILENT_REBOOT_TARGET_KOREADER_SIGN_UP;
 constexpr uint32_t SILENT_REBOOT_LIGHT_ON = 1U << 0;
 
 // How the device is coming back to life, resolved once at boot. Both resume
@@ -208,6 +211,24 @@ void silentRestart(bool paint) { silentRestartTo(SILENT_REBOOT_TARGET_HOME, "hom
 void silentRestartToReader(bool paint) { silentRestartTo(SILENT_REBOOT_TARGET_READER, "reader", paint); }
 
 void silentRestartToSettings(bool paint) { silentRestartTo(SILENT_REBOOT_TARGET_SETTINGS, "settings", paint); }
+
+// Set at boot by a READER_KOSYNC reboot; the reader consumes it once.
+static bool koSyncResumePending = false;
+
+void silentRestartToReaderSync(bool paint) {
+  silentRestartTo(SILENT_REBOOT_TARGET_READER_KOSYNC, "reader-kosync", paint);
+}
+
+bool consumeKoSyncResume() {
+  const bool pending = koSyncResumePending;
+  koSyncResumePending = false;
+  return pending;
+}
+
+void silentRestartToKOReaderAuth(const bool signUp, bool paint) {
+  silentRestartTo(signUp ? SILENT_REBOOT_TARGET_KOREADER_SIGN_UP : SILENT_REBOOT_TARGET_KOREADER_AUTH, "koreader-auth",
+                  paint);
+}
 
 // Reboot into a clean heap and resume the tailnet OPDS browse from the feed
 // spooled on the SD card. paint=false when the framebuffer has been released
@@ -662,8 +683,10 @@ void setup() {
   } else if (rebootedFromPanic) {
     // If we rebooted from a panic, go to crash report screen to show the panic info
     activityManager.goToCrashReport();
-  } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_READER &&
+  } else if (resume == BootResume::Silent &&
+             (snapshotTarget == SILENT_REBOOT_TARGET_READER || snapshotTarget == SILENT_REBOOT_TARGET_READER_KOSYNC) &&
              !APP_STATE.openEpubPath.empty()) {
+    koSyncResumePending = snapshotTarget == SILENT_REBOOT_TARGET_READER_KOSYNC;
     activityManager.goToReader(APP_STATE.openEpubPath);
   } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_JOIN_NETWORK) {
     // Rebooted on the way *into* File Transfer > Join Network for a fresh heap;
@@ -676,6 +699,10 @@ void setup() {
     // Resumed after a low-heap reboot: reopen the tailnet OPDS browse with a
     // clean heap so the concurrent DERP + HTTPS path fits.
     activityManager.goToBrowserServer(silentRebootOpdsIndex);
+  } else if (resume == BootResume::Silent && (snapshotTarget == SILENT_REBOOT_TARGET_KOREADER_AUTH ||
+                                              snapshotTarget == SILENT_REBOOT_TARGET_KOREADER_SIGN_UP)) {
+    // Rebooted out of a tailnet auth request for a fresh heap; repeat it.
+    activityManager.goToKOReaderAuth(snapshotTarget == SILENT_REBOOT_TARGET_KOREADER_SIGN_UP);
   } else if (resume == BootResume::Silent) {
     // target == home (or reader with no open book): land on home — don't fall
     // through to the sleep-wake "resume reader" logic, which fires on stale
@@ -790,6 +817,20 @@ void loop() {
       } else if (cmd == "OPDS_BACK") {
         auto* browser = OpdsBookBrowserActivity::instance();
         logSerial.printf("OPDS_BACK_ACK:%d\n", browser && browser->injectBack() ? 1 : 0);
+      } else if (cmd == "FILE_TRANSFER") {
+        // Headless test driver: start File Transfer on a saved network so
+        // settings can be set through the web API.
+        logSerial.printf("FILE_TRANSFER_ACK\n");
+        activityManager.goToJoinNetwork();
+      } else if (cmd.startsWith("OPDS_SERVER ")) {
+        // Headless test driver: open the OPDS browser on server N.
+        logSerial.printf("OPDS_SERVER_ACK\n");
+        activityManager.goToBrowserServer(static_cast<size_t>(cmd.substring(12).toInt()));
+      } else if (cmd.startsWith("OPEN ")) {
+        // Headless test driver: open a book by SD path.
+        const String path = cmd.substring(5);
+        logSerial.printf("OPEN_ACK:%d\n", Storage.exists(path.c_str()) ? 1 : 0);
+        if (Storage.exists(path.c_str())) activityManager.goToReader(path.c_str());
       }
     }
   }
