@@ -6,8 +6,10 @@
 #include "SyncDecision.h"
 
 using koreader_sync::decideSmart;
+using koreader_sync::Lookup;
 using koreader_sync::preferAlternate;
 using koreader_sync::SmartAction;
+using koreader_sync::uploadInFetchWindow;
 
 namespace {
 constexpr float kEps = 0.001f;
@@ -107,4 +109,33 @@ TEST(PreferAlternate, PrimaryErrorAlternateOkTakesAlternate) {
   // alternate is the only real record; the primary pct is still its initial 0.
   EXPECT_TRUE(preferAlternate(/*primaryOk=*/false, /*primaryNotFound=*/false, 0.0f, /*altOk=*/true, 0.0f));
   EXPECT_TRUE(preferAlternate(/*primaryOk=*/false, /*primaryNotFound=*/false, 0.9f, /*altOk=*/true, 0.1f));
+}
+
+// --- uploadInFetchWindow ---------------------------------------------------
+
+TEST(UploadInFetchWindow, SmartWithNoRecordAnywhereUploads) {
+  EXPECT_TRUE(uploadInFetchWindow(/*smart=*/true, Lookup::NotFound, Lookup::NotFound));
+}
+
+TEST(UploadInFetchWindow, SmartWithoutAlternateProbeUploads) {
+  EXPECT_TRUE(uploadInFetchWindow(/*smart=*/true, Lookup::NotFound, Lookup::Skipped));
+}
+
+TEST(UploadInFetchWindow, AskEveryTimeNeverUploads) {
+  // The manual mode offers the upload to the user instead.
+  EXPECT_FALSE(uploadInFetchWindow(/*smart=*/false, Lookup::NotFound, Lookup::NotFound));
+  EXPECT_FALSE(uploadInFetchWindow(/*smart=*/false, Lookup::NotFound, Lookup::Skipped));
+}
+
+TEST(UploadInFetchWindow, FoundRecordNeedsMapping) {
+  EXPECT_FALSE(uploadInFetchWindow(/*smart=*/true, Lookup::Found, Lookup::NotFound));
+  EXPECT_FALSE(uploadInFetchWindow(/*smart=*/true, Lookup::NotFound, Lookup::Found));
+  EXPECT_FALSE(uploadInFetchWindow(/*smart=*/true, Lookup::Found, Lookup::Found));
+  EXPECT_FALSE(uploadInFetchWindow(/*smart=*/true, Lookup::Found, Lookup::Skipped));
+}
+
+TEST(UploadInFetchWindow, FailedLookupKeepsSeparateDecision) {
+  EXPECT_FALSE(uploadInFetchWindow(/*smart=*/true, Lookup::Failed, Lookup::NotFound));
+  EXPECT_FALSE(uploadInFetchWindow(/*smart=*/true, Lookup::NotFound, Lookup::Failed));
+  EXPECT_FALSE(uploadInFetchWindow(/*smart=*/true, Lookup::Failed, Lookup::Skipped));
 }

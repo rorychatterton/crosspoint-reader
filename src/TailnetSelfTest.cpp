@@ -602,10 +602,12 @@ CycleResult runDownloadCycle(const Config& cfg, Model& model, const unsigned rep
 }
 
 // ---------------------------------------------------------------------------
-// Sync mode: two tunnel windows per cycle. A reads the real book's
-// primary/alternate records and the synthetic baseline; B (the second
-// bring-up, which is what catches a deferred stop) writes the synthetic
-// record and reads it back.
+// Sync mode: two tunnel windows per cycle, matching the activity's two flows.
+// A reads the real book's primary/alternate records and the synthetic
+// baseline, then writes the synthetic record in the same window (the smart
+// sync upload when no record exists). B (the second bring-up, which is what
+// catches a deferred stop) is the separate upload window that follows a
+// mapped decision: it writes the synthetic record again and reads it back.
 bool isNetErr(const KOReaderSyncClient::Error e) {
   return e == KOReaderSyncClient::LOW_MEMORY || e == KOReaderSyncClient::NETWORK_ERROR ||
          e == KOReaderSyncClient::TAILNET_ERROR;
@@ -655,13 +657,22 @@ CycleResult runSyncCycle(const Config& cfg, Model& model, const unsigned iter) {
   const float pct = 0.10f + 0.01f * static_cast<float>(iter);
   bool netErr = false;
 
-  // Window A: reads only.
+  // Window A: reads, then the same-window upload. The record is built before
+  // the release, as the activity builds its payload, so it sits outside the
+  // framebuffer region while the window is open.
+  auto recA = makeUniqueNoThrow<KOReaderProgress>();
+  if (recA) {
+    recA->document = synthetic;
+    recA->progress = xpath;
+    recA->percentage = pct - 0.005f;  // B writes pct, so its read-back tells the two writes apart
+  }
+  bool putA = false;
   Window a;
   if (openWindow(cfg, model, baseUrl, a)) {
     KOReaderSyncClient::setBaseUrlOverride(a.url);
     auto prog = makeUniqueNoThrow<KOReaderProgress>();  // transient, freed before teardown
-    if (!prog) {
-      LOG_ERR(TAG, "SELFTEST sync A: OOM for progress record");
+    if (!prog || !recA) {
+      LOG_ERR(TAG, "SELFTEST sync A: OOM for progress records");
       netErr = true;
     } else {
       if (!primary.empty()) {
@@ -683,13 +694,19 @@ CycleResult runSyncCycle(const Config& cfg, Model& model, const unsigned iter) {
               KOReaderSyncClient::lastHttpCode, e == KOReaderSyncClient::OK ? prog->percentage : -1.0f, freeNow(),
               largestNow());
       netErr |= isNetErr(e);
+      const auto eu = KOReaderSyncClient::updateProgress(*recA);
+      putA = eu == KOReaderSyncClient::OK;
+      LOG_ERR(TAG, "SELFTEST sync A update=%d http=%d pct=%.4f free=%u largest=%u", eu,
+              KOReaderSyncClient::lastHttpCode, recA->percentage, freeNow(), largestNow());
+      netErr |= isNetErr(eu);
     }
     KOReaderSyncClient::clearBaseUrlOverride();
   }
   const CloseResult ca = closeWindow(cfg, model, a);
+  recA.reset();
   if (a.restart) return CycleResult::RESTART;  // the UI reboots here; window B would only meet TS-E03
 
-  // Window B: write the synthetic record, read it back, assert.
+  // Window B: write the synthetic record again, read it back, assert.
   Window b;
   CloseResult cb;
   bool rt = false;
@@ -729,10 +746,13 @@ CycleResult runSyncCycle(const Config& cfg, Model& model, const unsigned iter) {
     cb = closeWindow(cfg, model, b);
     if (b.restart) return CycleResult::RESTART;
   }
-  const bool pass = a.ready && b.ready && rt && !netErr && ca.reclaimed && cb.reclaimed && !ca.deferred && !cb.deferred;
+  const bool pass =
+      a.ready && b.ready && putA && rt && !netErr && ca.reclaimed && cb.reclaimed && !ca.deferred && !cb.deferred;
   LOG_ERR(
-      TAG, "SELFTEST RESULT=%s mode=sync iters=%u upA=%d upB=%d rt=%d reclaimA=%d reclaimB=%d neterr=%d deferred=%d",
-      pass ? "PASS" : "FAIL", iter + 1, a.up, b.up, rt, ca.reclaimed, cb.reclaimed, netErr, ca.deferred || cb.deferred);
+      TAG,
+      "SELFTEST RESULT=%s mode=sync iters=%u upA=%d upB=%d putA=%d rt=%d reclaimA=%d reclaimB=%d neterr=%d deferred=%d",
+      pass ? "PASS" : "FAIL", iter + 1, a.up, b.up, putA, rt, ca.reclaimed, cb.reclaimed, netErr,
+      ca.deferred || cb.deferred);
   return verdict(pass);
 }
 

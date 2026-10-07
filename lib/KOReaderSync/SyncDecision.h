@@ -5,8 +5,22 @@
 // can exercise exactly the branches KOReaderSyncActivity runs on-device.
 
 #include <cmath>
+#include <cstdint>
 
 namespace koreader_sync {
+
+// Outcome of one remote progress lookup. Skipped: no lookup was made (the
+// alternate document id is unavailable or equal to the primary one).
+enum class Lookup : uint8_t { Found, NotFound, Failed, Skipped };
+
+// True when smart mode can upload in the same tunnel window as the fetch: no
+// record exists under either document id, so the result is "upload" without
+// mapping anything through the Epub. A found record needs the mapped-position
+// comparison, and a failed lookup keeps the separate decision step.
+inline bool uploadInFetchWindow(bool smart, Lookup primary, Lookup alternate) {
+  if (!smart || primary != Lookup::NotFound) return false;
+  return alternate == Lookup::NotFound || alternate == Lookup::Skipped;
+}
 
 enum class SmartAction {
   AlreadySynced,  // |local - remote| <= eps: nothing to do

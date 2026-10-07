@@ -72,7 +72,7 @@ class KOReaderSyncActivity final : public Activity, private UiAppHost {
 
   // Tracks whether this session activated WiFi. Set in onEnter past the credentials
   // check; checked in onExit to decide whether to silent-reboot. Can't rely on
-  // WiFi.getMode() because performUpload() calls esp_wifi_stop() on the way out,
+  // WiFi.getMode() because finishUpload() calls esp_wifi_stop() on the way out,
   // which makes WiFi.getMode() return WIFI_MODE_NULL.
   bool wifiActivated = false;
 
@@ -91,6 +91,13 @@ class KOReaderSyncActivity final : public Activity, private UiAppHost {
   KOReaderProgress alternateProgress;
   bool hasAlternateProgress = false;
   KOReaderProgress uploadPayload;
+  bool uploadPayloadReady = false;
+  // Smart mode with no remote record: fetchRemoteProgressOp uploaded in the
+  // fetch window, with uploadResult as the outcome.
+  bool uploadedInFetchWindow = false;
+  KOReaderSyncClient::Error uploadResult = KOReaderSyncClient::OK;
+  void buildUploadPayload();
+  void finishUpload(KOReaderSyncClient::Error result);
   bool smartSyncEnabled() const;
   void markAutoReturn();
   void completeAlreadySynced();
