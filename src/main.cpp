@@ -836,6 +836,11 @@ void loop() {
         const String path = cmd.substring(5);
         logSerial.printf("OPEN_ACK:%d\n", Storage.exists(path.c_str()) ? 1 : 0);
         if (Storage.exists(path.c_str())) activityManager.goToReader(path.c_str());
+      } else if (cmd == "KOSYNC") {
+        // Headless test driver: the open book starts a KOReader sync once its
+        // page has rendered (the same path a READER_KOSYNC reboot takes).
+        koSyncResumePending = true;
+        logSerial.printf("KOSYNC_ACK\n");
       }
     }
   }
