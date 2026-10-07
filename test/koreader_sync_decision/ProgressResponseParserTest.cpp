@@ -4,6 +4,7 @@
 
 #include "ProgressResponseParser.h"
 
+using koreader_sync::isEmptyProgress;
 using koreader_sync::parseProgressResponse;
 
 namespace {
@@ -51,7 +52,7 @@ TEST(ProgressResponseParser, FullRecordOnCrossPointServer) {
   EXPECT_EQ(out.position->xpath, "/body/DocFragment[3]/body/p[7]");
 }
 
-TEST(ProgressResponseParser, EmptyObjectParsesAsZeroProgress) {
+TEST(ProgressResponseParser, EmptyObjectParsesAsEmptyRecord) {
   KOReaderProgress out = dirtyProgress();
   ASSERT_TRUE(parseProgressResponse("{}", /*richProgress=*/true, out));
   EXPECT_EQ(out.progress, "");
@@ -60,6 +61,18 @@ TEST(ProgressResponseParser, EmptyObjectParsesAsZeroProgress) {
   EXPECT_EQ(out.deviceId, "");
   EXPECT_EQ(out.timestamp, 0);
   EXPECT_FALSE(out.position.has_value());
+  EXPECT_TRUE(isEmptyProgress(out));
+}
+
+TEST(ProgressResponseParser, StoredRecordIsNotEmpty) {
+  KOReaderProgress out = dirtyProgress();
+  ASSERT_TRUE(parseProgressResponse(kFullRecord, /*richProgress=*/false, out));
+  EXPECT_FALSE(isEmptyProgress(out));
+
+  KOReaderProgress startOfBook = dirtyProgress();
+  ASSERT_TRUE(parseProgressResponse(R"({"progress":"/body/DocFragment[1]/body","percentage":0,"timestamp":1758200000})",
+                                    /*richProgress=*/false, startOfBook));
+  EXPECT_FALSE(isEmptyProgress(startOfBook));
 }
 
 TEST(ProgressResponseParser, PositionIgnoredOnStockKOSyncServer) {

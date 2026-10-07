@@ -23,7 +23,8 @@ inline std::string stringOr(JsonVariantConst v) {
 // Fills `out` from a 2xx response body. Returns false on malformed JSON and,
 // when `error` is given, points it at ArduinoJson's static reason string.
 // `out.document` is not in the body; the caller sets it. An empty object `{}`
-// (the reference server's "no progress yet" answer) parses as zero progress.
+// (the reference server's "no progress yet" answer) parses to a record that
+// isEmptyProgress() reports.
 // The rich `position` object is only honoured when the server type supports it;
 // stock KOSync servers never send it and a stray one must not be trusted.
 inline bool parseProgressResponse(const char* json, bool richProgress, KOReaderProgress& out,
@@ -58,6 +59,12 @@ inline bool parseProgressResponse(const char* json, bool richProgress, KOReaderP
     }
   }
   return true;
+}
+
+// True for a parsed record that carries no progress at all, so the caller can
+// treat it like a 404.
+inline bool isEmptyProgress(const KOReaderProgress& p) {
+  return p.progress.empty() && p.timestamp == 0 && !p.position.has_value();
 }
 
 }  // namespace koreader_sync

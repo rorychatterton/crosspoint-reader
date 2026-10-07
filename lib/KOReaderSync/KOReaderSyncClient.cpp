@@ -177,6 +177,8 @@ KOReaderSyncClient::Error KOReaderSyncClient::getProgress(const std::string& doc
       return JSON_ERROR;
     }
 
+    if (koreader_sync::isEmptyProgress(outProgress)) return NOT_FOUND;
+
     outProgress.document = documentHash;
     if (outProgress.position.has_value()) {
       const auto& rich = *outProgress.position;
