@@ -136,6 +136,10 @@ TEST(HtmlVoidElementFixer, LeavesCommentsCdataScriptAndStyleUntouched) {
   expectFixed(input, input);
 }
 
+TEST(HtmlVoidElementFixer, ReplacesForbiddenControlCharacters) {
+  expectFixed(std::string("<p>Wieckowska\x0b\x0bVIDEO\x01</p>\t\r\n"), "<p>Wieckowska  VIDEO </p>\t\r\n");
+}
+
 TEST(HtmlVoidElementFixer, ReleasesHeldBytesAtEndOfInput) {
   expectFixed("a<", "a<");
   expectFixed("a</b", "a</b");

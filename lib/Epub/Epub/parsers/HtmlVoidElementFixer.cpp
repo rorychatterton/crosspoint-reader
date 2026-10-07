@@ -266,7 +266,12 @@ size_t HtmlVoidElementFixer::feed(const char* in, const size_t len, char* out) {
   size_t o = 0;
   size_t i = 0;
   while (i < len) {
-    if (step(in[i], out, o)) i++;
+    // XML 1.0 forbids C0 controls other than tab, LF and CR, and expat stops at
+    // the first one, so read them as spaces.
+    char c = in[i];
+    const auto u = static_cast<unsigned char>(c);
+    if (u < 0x20 && c != '\t' && c != '\n' && c != '\r') c = ' ';
+    if (step(c, out, o)) i++;
   }
   return o;
 }

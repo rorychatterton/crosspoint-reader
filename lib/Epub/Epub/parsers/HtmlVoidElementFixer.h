@@ -6,6 +6,7 @@
 // Streaming byte rewriter that lets a strict XML parser accept HTML void elements
 // written without a self-closing slash: `<meta charset="utf-8">` becomes
 // `<meta charset="utf-8"/>`, and end tags of void elements (`</br>`) are dropped.
+// C0 control characters XML forbids (all but tab, LF, CR) become spaces.
 // Comments, CDATA, processing instructions, declarations, quoted attribute values
 // and <script>/<style> contents pass through untouched. Input may be split at any
 // byte; state carries across feed() calls.
