@@ -16,6 +16,7 @@
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
+#include "TailscaleStore.h"
 #include "activities/RenderLock.h"
 #include "components/CatalogScreens.h"
 #include "components/UITheme.h"
@@ -32,6 +33,25 @@ namespace fui = freeink::ui;
 
 namespace {
 constexpr unsigned long TAILNET_PROGRESS_LOG_MS = 5000;
+// Allowance for bringing the tunnel up before a tailnet download starts.
+constexpr uint32_t TAILNET_BRINGUP_S = 6;
+
+// "8.6 MB, about 5 min": the size and expected duration of a tailnet download,
+// shown on the Downloading frame the panel keeps during the transfer.
+void formatDownloadEstimate(char* out, const size_t cap, const uint32_t bytes, const uint32_t seconds) {
+  char size[16];
+  if (bytes >= 1024 * 1024) {
+    const auto tenths = static_cast<unsigned>((static_cast<uint64_t>(bytes) * 10 + (1u << 19)) >> 20);
+    snprintf(size, sizeof(size), "%u.%u MB", tenths / 10, tenths % 10);
+  } else {
+    snprintf(size, sizeof(size), "%u KB", static_cast<unsigned>((bytes + 1023) >> 10));
+  }
+  if (seconds < 60) {
+    snprintf(out, cap, tr(STR_DOWNLOAD_ESTIMATE_SHORT), size);
+  } else {
+    snprintf(out, cap, tr(STR_DOWNLOAD_ESTIMATE), size, static_cast<unsigned>((seconds + 30) / 60));
+  }
+}
 
 // Tailnet feed spool and the resume sidecar that carries the browse state
 // (fetch result, current path, history) across a reboot into the browser.
@@ -508,6 +528,7 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
   filename += '/';
   filename += opdsBookFilename(book.author, book.title, static_cast<OpdsFilenameFormat>(SETTINGS.opdsFilenameFormat));
   LOG_DBG("OPDS", "Downloading: %s -> %s", downloadUrl.c_str(), filename.c_str());
+  const uint32_t bookSize = book.size;
 
   // The selected book data is now copied into the download URL, filename, and
   // status line. Reclaim the catalog while TLS owns its record buffers; reload
@@ -531,10 +552,19 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
   // the display comes back (reclaim, or a reboot into the browse with the feed
   // fetch pending).
   if (auto* fcm = renderer.getFontCacheManager()) fcm->releaseSdFontCaches();
+  uint32_t estimateS = 0;
+  if (bookSize > 0) {
+    const uint32_t bps = TAILSCALE_STORE.getDownloadBps();
+    estimateS = bookSize / bps + (TAILNET.isUp() ? 0 : TAILNET_BRINGUP_S);
+    formatDownloadEstimate(downloadNote, sizeof(downloadNote), bookSize, estimateS);
+    LOG_INF("OPDS", "Download estimate: %u bytes at %u B/s, ~%u s", static_cast<unsigned>(bookSize),
+            static_cast<unsigned>(bps), static_cast<unsigned>(estimateS));
+  }
   requestUpdateAndWait();
   if (!TAILNET.isUp()) TAILNET.setTargetUrl(downloadUrl);  // before the release (see fetchFeed)
   HttpDownloader::DownloadError result = HttpDownloader::ABORTED;
   bool started = false;
+  const unsigned long startMs = millis();
   {
     RenderLock lock;
     TailnetSession::prepareCallerTask();
@@ -571,6 +601,13 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book) {
   if (!started) {  // prepareTailnetUrl() set the error
     requestUpdate();
     return;
+  }
+  if (result == HttpDownloader::OK) {
+    // After the reclaim: the store's SD write must not allocate inside the lent region.
+    const HttpDownloader::TransferStats stats = HttpDownloader::lastDownload();
+    LOG_INF("OPDS", "Download took %u s (estimated %u s, %u bytes)", static_cast<unsigned>((millis() - startMs) / 1000),
+            static_cast<unsigned>(estimateS), static_cast<unsigned>(stats.bytes));
+    TAILSCALE_STORE.recordDownload(stats.bytes, stats.ms);
   }
   finishDownload(result);
 }

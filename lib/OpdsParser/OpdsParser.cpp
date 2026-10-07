@@ -3,6 +3,7 @@
 #include <Logging.h>
 #include <XmlParserUtils.h>
 
+#include <cstdlib>
 #include <cstring>
 
 namespace {
@@ -116,6 +117,14 @@ void OpdsParser::appendBounded(std::string& target, const char* value, const siz
   target.append(value, len < remaining ? len : remaining);
 }
 
+uint32_t OpdsParser::parseLength(const char* value) {
+  if (!value || *value < '0' || *value > '9') return 0;
+  char* end = nullptr;
+  const unsigned long long n = strtoull(value, &end, 10);
+  if (*end != '\0' || n > UINT32_MAX) return 0;
+  return static_cast<uint32_t>(n);
+}
+
 void XMLCALL OpdsParser::startElement(void* userData, const XML_Char* name, const XML_Char** atts) {
   auto* self = static_cast<OpdsParser*>(userData);
 
@@ -157,6 +166,7 @@ void XMLCALL OpdsParser::startElement(void* userData, const XML_Char* name, cons
           if (self->currentEntry.type != OpdsEntryType::BOOK || (isPlainEpub && !alreadyHasPlainEpub)) {
             self->currentEntry.type = OpdsEntryType::BOOK;
             assignBounded(self->currentEntry.href, href, MAX_HREF_CHARS);
+            self->currentEntry.size = parseLength(findAttribute(atts, "length"));
           }
         } else if (type && strstr(type, "application/atom+xml") != nullptr) {
           if (self->currentEntry.type != OpdsEntryType::BOOK) {

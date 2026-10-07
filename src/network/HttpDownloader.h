@@ -57,4 +57,14 @@ class HttpDownloader {
                                       ProgressCallback progress = nullptr, const bool* cancelFlag = nullptr,
                                       const std::string& username = "", const std::string& password = "",
                                       const std::vector<Header>& headers = {}, bool downgradeRedirectsToHttp = false);
+
+  // Size and wall time of the last downloadToFile(); zero unless it succeeded.
+  struct TransferStats {
+    size_t bytes = 0;
+    uint32_t ms = 0;
+  };
+  static TransferStats lastDownload() { return lastDownloadStats; }
+
+ private:
+  static TransferStats lastDownloadStats;
 };

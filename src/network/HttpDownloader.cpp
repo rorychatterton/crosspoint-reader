@@ -73,6 +73,8 @@ HttpDownloader::DownloadError runGetSecure(const std::string& url, const std::st
 
 }  // namespace
 
+HttpDownloader::TransferStats HttpDownloader::lastDownloadStats;
+
 bool HttpDownloader::fetchUrl(const std::string& url, Stream& outContent, const std::string& username,
                               const std::string& password) {
   return fetchUrl(
@@ -94,6 +96,7 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
                                                              const std::vector<Header>& headers,
                                                              bool downgradeRedirectsToHttp) {
   LOG_DBG("HTTP", "Downloading: %s -> %s", url.c_str(), destPath.c_str());
+  lastDownloadStats = {};
 
   // Stage in <dest>.part: a failed or cancelled download never replaces an
   // existing copy, and a partial file never sits under the real name.
@@ -158,5 +161,6 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
   const unsigned long ms = millis() - startMs;
   LOG_INF("HTTP", "Downloaded %zu bytes in %lu ms, %u KB/s", downloaded, ms,
           ms > 0 ? static_cast<unsigned>(downloaded / ms) : 0u);
+  lastDownloadStats = {downloaded, static_cast<uint32_t>(ms)};
   return OK;
 }

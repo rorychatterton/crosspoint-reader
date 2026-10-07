@@ -95,6 +95,7 @@ add_subdirectory(plugin_manifest_classification)
 add_subdirectory(protected_paths)
 
 add_subdirectory(opds_feed_cache)
+add_subdirectory(opds_parser)
 add_subdirectory(tailnet_state)
 add_subdirectory(tailnet_h2_stream)
 add_subdirectory(tailnet_map_filter)

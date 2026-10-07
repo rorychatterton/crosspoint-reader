@@ -35,6 +35,8 @@ class CatalogActivity : public UiListActivity {
   State state = State::LOADING;
   std::string errorMessage, statusMessage;
   size_t downloadProgress = 0, downloadTotal = 0;
+  // Shown in place of the byte count while no progress can be drawn; empty = none.
+  char downloadNote[64] = {};
   bool cancelDownload = false;
 
   virtual void startBrowse() = 0;

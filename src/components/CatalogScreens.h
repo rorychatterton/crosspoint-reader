@@ -30,6 +30,8 @@ void catalogCenteredBlock(UiAppHost::UiScreen& screen, std::initializer_list<Cat
 
 // Centered download screen: heading, item title, download progress and, when
 // cancelAction is a real action, a Cancel button. A progress bar is shown when
-// the total is known (total > 0), otherwise a running byte count.
+// the total is known (total > 0), otherwise a running byte count, or `note`
+// in its place when one is given (a size and time estimate for a transfer
+// that cannot repaint).
 void catalogDownloadScreen(UiAppHost::UiScreen& screen, const char* status, size_t progress, size_t total,
-                           freeink::ui::ActionId cancelAction = freeink::ui::NO_ACTION);
+                           freeink::ui::ActionId cancelAction = freeink::ui::NO_ACTION, const char* note = nullptr);

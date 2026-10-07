@@ -145,6 +145,7 @@ void CatalogActivity::beginDownload(const std::string& title) {
   state = State::DOWNLOADING;
   statusMessage = title;
   downloadProgress = downloadTotal = 0;
+  downloadNote[0] = '\0';
   cancelDownload = goHomeAfterCancel = false;
   requestUpdate(true);
 }
@@ -215,7 +216,7 @@ bool CatalogActivity::buildStatusScreen(UiScreen& screen, const bool boldError, 
   switch (state) {
     case State::DOWNLOADING:
       catalogDownloadScreen(screen, statusMessage.c_str(), downloadProgress, showDownloadTotal ? downloadTotal : 0,
-                            ACTION_CANCEL);
+                            ACTION_CANCEL, downloadNote);
       break;
     case State::ERROR:
       if (mappedInput.hasTouch()) {

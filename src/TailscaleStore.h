@@ -39,6 +39,8 @@ class TailscaleStore : public PersistableStore<TailscaleStore> {
   // device.
   std::string identityKeys;
   std::string identityPub;
+  // Smoothed throughput of tailnet book downloads in bytes/s; 0 = never measured.
+  uint32_t lastDownloadBps = 0;
 
   // A compile-time key (personal builds, via gitignored platformio.local.ini)
   // seeds the in-memory default so it works even with no tailscale.json on
@@ -99,6 +101,14 @@ class TailscaleStore : public PersistableStore<TailscaleStore> {
   const std::string& getIdentityPub() const { return identityPub; }
   // Saves only when the backup differs from what is stored.
   void setIdentity(const uint8_t* keys, const uint8_t* machinePub);
+
+  static constexpr uint32_t DEFAULT_DOWNLOAD_BPS = 25 * 1024;
+  // Expected tailnet download rate: the remembered measurement, else the default.
+  uint32_t getDownloadBps() const { return lastDownloadBps ? lastDownloadBps : DEFAULT_DOWNLOAD_BPS; }
+  // Folds a successful tailnet download into the remembered rate. Transfers
+  // under 256 KB are ignored, and the file is saved only when the rate moves
+  // by 5% or more.
+  void recordDownload(size_t bytes, uint32_t ms);
 };
 
 #define TAILSCALE_STORE TailscaleStore::getInstance()

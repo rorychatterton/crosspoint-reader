@@ -2,6 +2,7 @@
 #include <Print.h>
 #include <expat.h>
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -22,6 +23,7 @@ struct OpdsEntry {
   std::string author;  // Only for books
   std::string href;    // Navigation URL or epub download URL
   std::string id;
+  uint32_t size = 0;  // Bytes, from the acquisition link's length attribute; 0 when absent
 };
 
 // Legacy alias for backward compatibility
@@ -96,6 +98,7 @@ class OpdsParser final : public Print {
   static const char* findAttribute(const XML_Char** atts, const char* name);
   static void assignBounded(std::string& target, const char* value, size_t maxLen);
   static void appendBounded(std::string& target, const char* value, size_t len, size_t maxLen);
+  static uint32_t parseLength(const char* value);
 
   XML_Parser parser = nullptr;
   std::vector<OpdsEntry> entries;

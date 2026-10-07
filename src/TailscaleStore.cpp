@@ -15,6 +15,7 @@ void TailscaleStore::toJson(JsonDocument& doc) const {
   doc["netmapValid"] = netmapValid;
   doc["netmapCachedAt"] = netmapCachedAt;
   doc["netmapColdAt"] = netmapColdAt;
+  doc["lastDownloadBps"] = lastDownloadBps;
   if (hasIdentity()) {
     doc["identity_obf"] = obfuscation::obfuscateToBase64(identityKeys);
     doc["identityPub"] = obfuscation::obfuscateToBase64(identityPub);
@@ -56,6 +57,7 @@ bool TailscaleStore::fromJson(JsonVariantConst doc) {
   netmapValid = doc["netmapValid"] | false;
   netmapCachedAt = doc["netmapCachedAt"] | 0u;
   netmapColdAt = doc["netmapColdAt"] | 0u;
+  lastDownloadBps = doc["lastDownloadBps"] | 0u;
 
   identityKeys.clear();
   identityPub.clear();
@@ -162,5 +164,19 @@ void TailscaleStore::setIdentity(const uint8_t* keys, const uint8_t* machinePub)
   if (newKeys == identityKeys && newPub == identityPub) return;
   identityKeys = newKeys;
   identityPub = newPub;
+  saveToFile();
+}
+
+void TailscaleStore::recordDownload(const size_t bytes, const uint32_t ms) {
+  // Smaller transfers are dominated by request latency and TLS setup.
+  constexpr size_t MIN_BYTES = 256 * 1024;
+  if (bytes < MIN_BYTES || ms == 0) return;
+  const auto measured = static_cast<uint32_t>(static_cast<uint64_t>(bytes) * 1000 / ms);
+  const uint32_t next = lastDownloadBps ? lastDownloadBps / 2 + measured / 2 : measured;
+  const uint32_t delta = next > lastDownloadBps ? next - lastDownloadBps : lastDownloadBps - next;
+  if (delta == 0 || (lastDownloadBps != 0 && delta < lastDownloadBps / 20)) return;
+  LOG_INF("TSS", "Download rate %u -> %u B/s (measured %u)", static_cast<unsigned>(lastDownloadBps),
+          static_cast<unsigned>(next), static_cast<unsigned>(measured));
+  lastDownloadBps = next;
   saveToFile();
 }
