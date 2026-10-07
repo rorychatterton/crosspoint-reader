@@ -27,6 +27,8 @@
 // Minimum file size (in bytes) to show indexing popup - smaller chapters don't benefit from it
 constexpr size_t MIN_SIZE_FOR_POPUP = 10 * 1024;  // 10KB
 constexpr size_t PARSE_BUFFER_SIZE = 1024;
+// File bytes per parse step; the rest of the expat buffer absorbs HtmlVoidElementFixer growth.
+constexpr size_t PARSE_READ_SIZE = 800;
 
 // This number comes from PR #73
 // If we have > 750 words buffered up, perform the layout and consume out all but the last line
@@ -2098,6 +2100,7 @@ bool ChapterHtmlSlimParser::beginParse() {
   XML_SetUserData(xmlParser_, this);
   XML_SetElementHandler(xmlParser_, startElement, endElement);
   XML_SetCharacterDataHandler(xmlParser_, characterData);
+  voidFixer_.reset();
 
   parseStartTime_ = millis();
   return true;
@@ -2111,13 +2114,18 @@ ChapterHtmlSlimParser::ParseStatus ChapterHtmlSlimParser::parseStep() {
     return ParseStatus::Error;
   }
 
-  void* const buf = XML_GetBuffer(xmlParser_, PARSE_BUFFER_SIZE);
+  // Raw bytes are read past a headroom gap and rewritten forward in place (unclosed HTML void
+  // elements gain their '/'), so the fixer needs no buffer of its own.
+  constexpr size_t headroom = HtmlVoidElementFixer::growthFor(PARSE_READ_SIZE);
+  static_assert(PARSE_READ_SIZE + headroom + HtmlVoidElementFixer::MAX_HELD <= PARSE_BUFFER_SIZE);
+  auto* const buf = static_cast<char*>(XML_GetBuffer(xmlParser_, PARSE_BUFFER_SIZE));
   if (!buf) {
     LOG_ERR("EHP", "Couldn't allocate memory for buffer");
     return ParseStatus::Error;
   }
 
-  const size_t len = parseFile_.read(buf, PARSE_BUFFER_SIZE);
+  char* const raw = buf + headroom;
+  const size_t len = parseFile_.read(raw, PARSE_READ_SIZE);
 
   if (len == 0 && parseFile_.available() > 0) {
     LOG_ERR("EHP", "File read error");
@@ -2126,7 +2134,12 @@ ChapterHtmlSlimParser::ParseStatus ChapterHtmlSlimParser::parseStep() {
 
   const int done = parseFile_.available() == 0;
 
-  if (XML_ParseBuffer(xmlParser_, static_cast<int>(len), done) == XML_STATUS_ERROR) {
+  size_t outLen = voidFixer_.feed(raw, len, buf);
+  if (done) {
+    outLen += voidFixer_.finish(buf + outLen);
+  }
+
+  if (XML_ParseBuffer(xmlParser_, static_cast<int>(outLen), done) == XML_STATUS_ERROR) {
     if (htmlEnded_) {
       LOG_DBG("EHP", "Ignoring trailing data after </html>: %s", XML_ErrorString(XML_GetErrorCode(xmlParser_)));
       return ParseStatus::Done;

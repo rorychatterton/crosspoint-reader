@@ -16,6 +16,7 @@
 #include "Epub/blocks/TextBlock.h"
 #include "Epub/css/CssParser.h"
 #include "Epub/css/CssStyle.h"
+#include "Epub/parsers/HtmlVoidElementFixer.h"
 
 class Page;
 class GfxRenderer;
@@ -159,6 +160,7 @@ class ChapterHtmlSlimParser {
   // for the lifetime of the parse so it can be paused and resumed at buffer
   // boundaries.
   XML_Parser xmlParser_ = nullptr;
+  HtmlVoidElementFixer voidFixer_;
   HalFile parseFile_;
   uint32_t parseStartTime_ = 0;
 
