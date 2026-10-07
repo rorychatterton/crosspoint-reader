@@ -15,6 +15,10 @@ void TailscaleStore::toJson(JsonDocument& doc) const {
   doc["netmapValid"] = netmapValid;
   doc["netmapCachedAt"] = netmapCachedAt;
   doc["netmapColdAt"] = netmapColdAt;
+  if (hasIdentity()) {
+    doc["identity_obf"] = obfuscation::obfuscateToBase64(identityKeys);
+    doc["identityPub"] = obfuscation::obfuscateToBase64(identityPub);
+  }
 }
 
 bool TailscaleStore::fromJson(JsonVariantConst doc) {
@@ -52,6 +56,23 @@ bool TailscaleStore::fromJson(JsonVariantConst doc) {
   netmapValid = doc["netmapValid"] | false;
   netmapCachedAt = doc["netmapCachedAt"] | 0u;
   netmapColdAt = doc["netmapColdAt"] | 0u;
+
+  identityKeys.clear();
+  identityPub.clear();
+  const char* identity = doc["identity_obf"] | "";
+  const char* identityPubEncoded = doc["identityPub"] | "";
+  if (identity[0] != '\0' && identityPubEncoded[0] != '\0') {
+    bool keysOk = false;
+    bool pubOk = false;
+    std::string keys = obfuscation::deobfuscateFromBase64(identity, &keysOk);
+    std::string pub = obfuscation::deobfuscateFromBase64(identityPubEncoded, &pubOk);
+    if (keysOk && pubOk && keys.size() == IDENTITY_KEYS_BYTES && pub.size() == IDENTITY_PUB_BYTES) {
+      identityKeys = std::move(keys);
+      identityPub = std::move(pub);
+    } else {
+      LOG_ERR("TSS", "Ignoring unreadable tailnet identity backup");
+    }
+  }
 
 #ifdef CROSSPOINT_TAILNET_AUTHKEY
   // Personal-build escape hatch: a key baked in via platformio.local.ini
@@ -132,5 +153,14 @@ void TailscaleStore::clearNetmapCache() {
   netmapValid = false;
   netmapCachedAt = 0;
   netmapColdAt = 0;
+  saveToFile();
+}
+
+void TailscaleStore::setIdentity(const uint8_t* keys, const uint8_t* machinePub) {
+  const std::string newKeys(reinterpret_cast<const char*>(keys), IDENTITY_KEYS_BYTES);
+  const std::string newPub(reinterpret_cast<const char*>(machinePub), IDENTITY_PUB_BYTES);
+  if (newKeys == identityKeys && newPub == identityPub) return;
+  identityKeys = newKeys;
+  identityPub = newPub;
   saveToFile();
 }

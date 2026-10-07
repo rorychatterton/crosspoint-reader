@@ -9,8 +9,9 @@
  * card. The auth key is XOR-obfuscated with the device's unique hardware MAC
  * address and base64-encoded before writing to JSON (not cryptographically
  * secure, but prevents casual reading and ties it to the specific device).
- * Use a reusable, tag-scoped key with a minimal ACL. The node identity keys
- * MicroLink derives during registration live in ESP NVS, not on SD.
+ * Use a reusable, tag-scoped key with a minimal ACL. MicroLink keeps the node
+ * identity keys in ESP NVS; a copy is kept here, obfuscated the same way, so a
+ * full reflash (which erases NVS) does not register the reader as a new node.
  */
 class TailscaleStore : public PersistableStore<TailscaleStore> {
  private:
@@ -33,6 +34,11 @@ class TailscaleStore : public PersistableStore<TailscaleStore> {
   bool netmapValid = false;
   uint32_t netmapCachedAt = 0;
   uint32_t netmapColdAt = 0;
+  // Backup of MicroLink's private keys (machine, WireGuard, DISCO; binary)
+  // and the machine public key that proves a decoded copy belongs to this
+  // device.
+  std::string identityKeys;
+  std::string identityPub;
 
   // A compile-time key (personal builds, via gitignored platformio.local.ini)
   // seeds the in-memory default so it works even with no tailscale.json on
@@ -86,6 +92,13 @@ class TailscaleStore : public PersistableStore<TailscaleStore> {
   uint32_t getNetmapColdAt() const { return netmapColdAt; }
   void setNetmapCache(const std::string& ip, uint16_t region, uint32_t cachedAt, uint32_t coldAt);
   void clearNetmapCache();
+  static constexpr size_t IDENTITY_KEYS_BYTES = 96;
+  static constexpr size_t IDENTITY_PUB_BYTES = 32;
+  bool hasIdentity() const { return identityKeys.size() == IDENTITY_KEYS_BYTES; }
+  const std::string& getIdentityKeys() const { return identityKeys; }
+  const std::string& getIdentityPub() const { return identityPub; }
+  // Saves only when the backup differs from what is stored.
+  void setIdentity(const uint8_t* keys, const uint8_t* machinePub);
 };
 
 #define TAILSCALE_STORE TailscaleStore::getInstance()

@@ -119,6 +119,28 @@ typedef void (*microlink_data_cb_t)(microlink_t* ml, uint32_t src_ip, const uint
  */
 esp_err_t microlink_factory_reset(void);
 
+/** Machine, WireGuard and DISCO private keys, 32 bytes each. */
+#define ML_IDENTITY_BYTES 96
+
+/**
+ * @brief Read the node identity from NVS so it can be backed up elsewhere
+ * @param keys Receives the three private keys
+ * @param machine_pub Receives the machine public key (identifies the backup)
+ * @return ESP_OK, or ESP_ERR_NOT_FOUND when no identity is stored yet
+ */
+esp_err_t microlink_identity_export(uint8_t keys[ML_IDENTITY_BYTES], uint8_t machine_pub[32]);
+
+/**
+ * @brief Write a backed-up node identity into NVS
+ * @param keys The three private keys from microlink_identity_export()
+ * @param machine_pub Expected machine public key; the import is refused if
+ *        the decoded machine key does not produce it (wrong device, damage)
+ * @return ESP_OK, ESP_ERR_INVALID_CRC on a mismatch, or an NVS error
+ *
+ * Must be called BEFORE microlink_init(), which reads the keys.
+ */
+esp_err_t microlink_identity_import(const uint8_t keys[ML_IDENTITY_BYTES], const uint8_t machine_pub[32]);
+
 /**
  * @brief Initialize MicroLink
  * @param config Configuration (copied internally)

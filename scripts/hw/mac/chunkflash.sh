@@ -1,24 +1,28 @@
 #!/bin/bash
 # Chunked flash for the ESP32-C3 reader on this Mac.
-# Usage: chunkflash.sh <factory-image> [port]
+# Usage: chunkflash.sh <image> [port] [offset]
+#
+# Offset defaults to 0 for a factory image. Pass 0x10000 with an app-only
+# firmware.bin to update the app and keep NVS (the Tailscale node keys).
 #
 # Any sustained esptool write over ~3 s drops the USB link on this Mac, so the
 # image is written in 128 KB chunks, each verified ("Hash of data verified")
 # and retried up to 5 times. Do not simplify this into one write-flash call.
 set -o pipefail
 H=$HOME
-IMG=${1:?usage: chunkflash.sh <image> [port]}
+IMG=${1:?usage: chunkflash.sh <image> [port] [offset]}
 PORT=${2:-/dev/cu.usbmodem8401}
+BASE=$(( ${3:-0} ))
 PY=$H/fwvenv/bin/python
 WORK=$H/hw
 mkdir -p "$WORK"
 CHUNK=131072
 SIZE=$(wc -c < "$IMG")
 N=$(( (SIZE + CHUNK - 1) / CHUNK ))
-echo "IMG $IMG size=$SIZE chunks=$N port=$PORT"
+echo "IMG $IMG size=$SIZE chunks=$N port=$PORT base=$(printf 0x%x $BASE)"
 i=0
 while [ $i -lt $N ]; do
-  off=$(( i * CHUNK ))
+  off=$(( BASE + i * CHUNK ))
   dd if="$IMG" of=$WORK/_chunk.bin bs=$CHUNK skip=$i count=1 2>/dev/null
   ok=0
   for try in 1 2 3 4 5; do

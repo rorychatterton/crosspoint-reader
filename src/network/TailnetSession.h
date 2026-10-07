@@ -194,6 +194,7 @@ class TailnetSession {
   bool bringUpAndWait(ProgressCallback cb, void* ctx, uint32_t timeoutMs);
   bool bringUpWarmOrCold(ProgressCallback cb, void* ctx, uint32_t timeoutMs);
   static bool heapAllowsBringUp();
+  static void syncIdentity();
   bool warmEligible(const char*& reason, uint32_t& ageSeconds) const;
   bool warmVerifyPeers();
   const char* warmFailureReason() const;

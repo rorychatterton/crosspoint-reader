@@ -156,6 +156,44 @@ esp_err_t microlink_factory_reset(void) {
   return ESP_OK;
 }
 
+esp_err_t microlink_identity_export(uint8_t keys[ML_IDENTITY_BYTES], uint8_t machine_pub[32]) {
+  nvs_handle_t nvs;
+  esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs);
+  if (err != ESP_OK) return ESP_ERR_NOT_FOUND;
+  const char* names[3] = {NVS_KEY_MACHINE_PRI, NVS_KEY_WG_PRI, NVS_KEY_DISCO_PRI};
+  for (int i = 0; i < 3 && err == ESP_OK; i++) {
+    size_t len = 32;
+    err = nvs_get_blob(nvs, names[i], keys + 32 * i, &len);
+    if (err == ESP_OK && len != 32) err = ESP_ERR_NOT_FOUND;
+  }
+  if (err == ESP_OK) {
+    size_t len = 32;
+    err = nvs_get_blob(nvs, NVS_KEY_MACHINE_PUB, machine_pub, &len);
+  }
+  nvs_close(nvs);
+  return err == ESP_OK ? ESP_OK : ESP_ERR_NOT_FOUND;
+}
+
+esp_err_t microlink_identity_import(const uint8_t keys[ML_IDENTITY_BYTES], const uint8_t machine_pub[32]) {
+  uint8_t pubs[3][32];
+  for (int i = 0; i < 3; i++) x25519_base(pubs[i], keys + 32 * i, 1);
+  if (memcmp(pubs[0], machine_pub, 32) != 0) return ESP_ERR_INVALID_CRC;
+
+  nvs_handle_t nvs;
+  esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
+  if (err != ESP_OK) return err;
+  const char* pri[3] = {NVS_KEY_MACHINE_PRI, NVS_KEY_WG_PRI, NVS_KEY_DISCO_PRI};
+  const char* pub[3] = {NVS_KEY_MACHINE_PUB, NVS_KEY_WG_PUB, NVS_KEY_DISCO_PUB};
+  for (int i = 0; i < 3 && err == ESP_OK; i++) {
+    err = nvs_set_blob(nvs, pri[i], keys + 32 * i, 32);
+    if (err == ESP_OK) err = nvs_set_blob(nvs, pub[i], pubs[i], 32);
+  }
+  if (err == ESP_OK) err = nvs_commit(nvs);
+  nvs_close(nvs);
+  if (err == ESP_OK) ESP_LOGI(TAG, "Identity imported into NVS");
+  return err;
+}
+
 /* ============================================================================
  * Public API
  * ========================================================================== */
@@ -1011,7 +1049,8 @@ bool microlink_peer_cache_poison(uint32_t vpn_ip) {
   if (!was_open && ml_peer_nvs_init() != ESP_OK) return false;
   const bool poisoned = ml_peer_nvs_poison(vpn_ip);
   if (!was_open) ml_peer_nvs_deinit();
-  if (poisoned) ESP_LOGE(TAG, "Peer cache poisoned for %u.%u.%u.%u", (unsigned)(vpn_ip >> 24),
-                         (unsigned)((vpn_ip >> 16) & 0xff), (unsigned)((vpn_ip >> 8) & 0xff), (unsigned)(vpn_ip & 0xff));
+  if (poisoned)
+    ESP_LOGE(TAG, "Peer cache poisoned for %u.%u.%u.%u", (unsigned)(vpn_ip >> 24), (unsigned)((vpn_ip >> 16) & 0xff),
+             (unsigned)((vpn_ip >> 8) & 0xff), (unsigned)(vpn_ip & 0xff));
   return poisoned;
 }

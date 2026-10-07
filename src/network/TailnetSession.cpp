@@ -275,6 +275,7 @@ bool TailnetSession::startBringUp(const uint32_t timeoutMs) {
     config.disco_heartbeat_ms = DISCO_HEARTBEAT_MS;
     config.stun_interval_ms = STUN_INTERVAL_MS;
 
+    syncIdentity();
     handle = microlink_init(&config);
     if (!handle) {
       setError(Error::INIT_FAILED);
@@ -286,6 +287,7 @@ bool TailnetSession::startBringUp(const uint32_t timeoutMs) {
       return false;
     }
     ml = handle;
+    syncIdentity();  // back up keys microlink_init just generated
 
     if (!TAILSCALE_STORE.getControlHost().empty()) {
       microlink_set_ctrl_host(handle, TAILSCALE_STORE.getControlHost().c_str());
@@ -471,6 +473,26 @@ bool TailnetSession::ensureUp(const ProgressCallback cb, void* ctx, const uint32
   const bool up = bringUpWarmOrCold(cb, ctx, timeoutMs);
   phaseTwo = false;
   return up;
+}
+
+// MicroLink keeps the node keys in NVS, which a full reflash erases. Restore
+// them from the SD backup when NVS has none, otherwise refresh the backup.
+void TailnetSession::syncIdentity() {
+  uint8_t keys[ML_IDENTITY_BYTES];
+  uint8_t pub[32];
+  if (microlink_identity_export(keys, pub) == ESP_OK) {
+    TAILSCALE_STORE.setIdentity(keys, pub);
+  } else if (TAILSCALE_STORE.hasIdentity()) {
+    const esp_err_t err =
+        microlink_identity_import(reinterpret_cast<const uint8_t*>(TAILSCALE_STORE.getIdentityKeys().data()),
+                                  reinterpret_cast<const uint8_t*>(TAILSCALE_STORE.getIdentityPub().data()));
+    if (err == ESP_OK) {
+      LOG_INF(TAG, "Restored tailnet identity from SD backup");
+    } else {
+      LOG_ERR(TAG, "SD identity backup not restored (%s); registering as a new node", esp_err_to_name(err));
+    }
+  }
+  memset(keys, 0, sizeof(keys));
 }
 
 void TailnetSession::prepareCallerTask() {
