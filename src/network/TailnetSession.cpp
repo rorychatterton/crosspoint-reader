@@ -117,6 +117,7 @@ void TailnetSession::writeStartupLog() const {
 #include <esp_heap_caps.h>
 #include <esp_netif.h>
 #include <lwip/dns.h>
+#include <lwip/api.h>
 #include <lwip/inet.h>
 #include <lwip/sys.h>
 #include <lwip/tcpip.h>
@@ -475,6 +476,31 @@ bool TailnetSession::ensureUp(const ProgressCallback cb, void* ctx, const uint32
   return up;
 }
 
+// The tailnet host the HTTP client will look up during a session, answered
+// with its tailnet address by lwip_hook_netconn_external_resolve() so the URL
+// keeps its hostname (SNI, Host) without a reachable tailnet DNS server.
+// Written by the session's caller task; read by whichever task resolves.
+static char resolveOverrideHost[64];
+static volatile uint32_t resolveOverrideIp = 0;
+
+static void setResolveOverride(const std::string& host, const uint32_t ip) {
+  resolveOverrideIp = 0;
+  snprintf(resolveOverrideHost, sizeof(resolveOverrideHost), "%s", host.c_str());
+  resolveOverrideIp = ip;
+}
+
+static void clearResolveOverride() { resolveOverrideIp = 0; }
+
+extern "C" int lwip_hook_netconn_external_resolve(const char* name, ip_addr_t* addr, u8_t addrtype, err_t* err) {
+  const uint32_t ip = resolveOverrideIp;
+  if (ip == 0 || name == nullptr || addrtype == NETCONN_DNS_IPV6 || strcasecmp(name, resolveOverrideHost) != 0) {
+    return 0;
+  }
+  IP_ADDR4(addr, (ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff);
+  *err = ERR_OK;
+  return 1;
+}
+
 // MicroLink keeps the node keys in NVS, which a full reflash erases. Restore
 // them from the SD backup when NVS has none, otherwise refresh the backup.
 void TailnetSession::syncIdentity() {
@@ -609,22 +635,14 @@ bool TailnetSession::warmEligible(const char*& reason, uint32_t& ageSeconds) con
   return true;
 }
 
-// The session is up in the tunnel sense; prove the cache with a handshake.
-// Both peers are initiated at once; only the primary one must answer (the
-// resolver is a convenience the URL rewrite can do without).
+// The session is up in the tunnel sense; prove the cache with a handshake to
+// the one peer this session needs (the resolve hook covers the hostname, so
+// the tailnet DNS server only matters while a name is still unresolved).
 bool TailnetSession::warmVerifyPeers() {
   auto* handle = static_cast<microlink_t*>(ml);
   if (!handle) return false;
-  uint32_t ips[2];
-  int count = 0;
   const uint32_t primary = resolvePending ? resolverIp : targetPeerIp;
-  ips[count++] = primary;
-  if (!resolvePending && resolverIp != 0) ips[count++] = resolverIp;
-  const esp_err_t err = microlink_wait_peers_ready(handle, ips, count, WARM_PEER_READY_MS);
-  if (err == ESP_OK) return true;
-  if (!microlink_peer_is_up(handle, primary)) return false;
-  LOG_INF(TAG, "Warm start: resolver peer did not answer within %u ms; continuing with the target", WARM_PEER_READY_MS);
-  return true;
+  return microlink_wait_peers_ready(handle, &primary, 1, WARM_PEER_READY_MS) == ESP_OK;
 }
 
 const char* TailnetSession::warmFailureReason() const {
@@ -739,25 +757,13 @@ std::string TailnetSession::rewriteUrlForTailnet(const std::string& url) {
   auto* handle = static_cast<microlink_t*>(ml);
   const uint32_t peerBudget = warmActive ? WARM_PEER_READY_MS : PEER_READY_MS;
 
-  if (ip == 0 && targetPeerIp != 0 && resolverIp != 0 && host == targetPeerHost) {
+  if (ip == 0 && targetPeerIp != 0 && host == targetPeerHost) {
     // Resolved through the tailnet, in this session or a cached earlier one.
-    // Keep the hostname in the URL for Host/SNI and point lwIP at the
-    // resolver so the HTTP client's own lookup also goes through the tunnel.
-    // Both handshakes are relayed round trips with nothing in common, so
-    // they are initiated together rather than one after the other.
+    // Keep the hostname in the URL for Host/SNI; the resolve hook answers the
+    // HTTP client's own lookup with this address.
     ip = targetPeerIp;
-    const uint32_t both[2] = {resolverIp, ip};
-    microlink_wait_peers_ready(handle, both, 2, peerBudget);
-    if (microlink_peer_is_up(handle, resolverIp)) {
-      rewriteHost = false;
-      applyDnsServer(resolverIp);
-    } else {
-      // Without the resolver the client cannot look the name up, so fall
-      // back to the address (loses Host/SNI for name-routed proxies, but a
-      // plain server still works). Leave the Wi-Fi DNS in place.
-      LOG_ERR(TAG, "Tailnet DNS server peer did not come up; using %s's address in the URL instead", host.c_str());
-      restoreDnsServer();
-    }
+    rewriteHost = false;
+    setResolveOverride(host, ip);
   }
 
   if (ip == 0) {
@@ -927,6 +933,7 @@ void TailnetSession::restoreDnsServer() {
 }
 
 void TailnetSession::teardown() {
+  clearResolveOverride();
   restoreDnsServer();
   auto* handle = static_cast<microlink_t*>(ml);
   if (!handle) return;
@@ -968,6 +975,12 @@ bool TailnetSession::ensureUp(const ProgressCallback cb, void* ctx, uint32_t) {
 bool TailnetSession::isUp() const { return false; }
 
 void TailnetSession::prepareCallerTask() {}
+
+#include <lwip/err.h>
+#include <lwip/ip_addr.h>
+
+// Declared by CONFIG_LWIP_HOOK_NETCONN_EXT_RESOLVE_CUSTOM; nothing to answer.
+extern "C" int lwip_hook_netconn_external_resolve(const char*, ip_addr_t*, u8_t, err_t*) { return 0; }
 
 bool TailnetSession::setTargetUrl(const std::string&) { return false; }
 
