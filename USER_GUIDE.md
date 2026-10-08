@@ -571,6 +571,7 @@ Once any of the options above is set up, press **Confirm** while reading to open
 
 - With **Sync Behavior** set to **Ask every time**, choose **Apply Remote** to jump to remote progress or **Upload Local** to push current progress.
 - With **Sync Behavior** set to **Smart sync**, CrossPoint auto-resolves simple cases: upload when no remote progress exists, confirm and leave both unchanged when local and remote progress are already synchronized, upload when local progress is further ahead, or apply remote when remote progress is further ahead.
+- With **Sync Progress on Sleep** on, putting the device to sleep from a book uploads its position behind the sleep screen. It joins the last-used Wi-Fi network (and Tailscale, if the sync server uses it), and does nothing when that network is out of range, the battery is below 20%, or you have not turned a page since the last upload. It never overwrites a position another device synced further on; open the book and run **Sync Progress** to pull that one. `/kosync-sleep.log` on the SD card records the outcome of the last attempt.
 
 ### 3.7 Sleep Screen
 

@@ -37,6 +37,7 @@
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
 #include "activities/browser/OpdsBookBrowserActivity.h"
+#include "activities/reader/KOReaderSleepSync.h"
 #include "activities/settings/SdFirmwareUpdateActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -330,6 +331,27 @@ static bool loadSleepFrameBuffer() {
   return true;
 }
 
+// Joins the last-used network for sleep-time delivery. Gives up early when the
+// network is out of range or rejects the password.
+static bool joinLastWifiForSleep() {
+  const auto cred = WIFI_STORE.findCredential(WIFI_STORE.getLastConnectedSsid());
+  if (!cred) return false;
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(cred->ssid.c_str(), cred->password.c_str());
+  const unsigned long joinDeadline = millis() + 10000;
+  while (millis() < joinDeadline) {
+    const wl_status_t status = WiFi.status();
+    if (status == WL_CONNECTED) {
+      trustedtime::startSync();  // snap the clock floor while the network is up
+      return true;
+    }
+    if (status == WL_NO_SSID_AVAIL || status == WL_CONNECT_FAILED) break;
+    delay(100);
+  }
+  LOG_DBG("MAIN", "Sleep WiFi join failed (status %d)", static_cast<int>(WiFi.status()));
+  return false;
+}
+
 // Plugin-event delivery on the way into deep sleep. sleep.enter is delivered
 // now — over the live connection, or by bringing WiFi up when a plugin
 // subscribes (e.g. fetching a fresh /sleep.bmp so THIS sleep shows it — the
@@ -368,22 +390,25 @@ static void deliverSleepPluginEvents() {
   // same sleep, and a progress-sync plugin usually subscribes to it alone.
   if (!pluginevents::wantsConnectAny()) return;
   if (powerManager.getBatteryPercentage() < 20) return;
-  const auto cred = WIFI_STORE.findCredential(WIFI_STORE.getLastConnectedSsid());
-  if (!cred) return;
+  if (!WIFI_STORE.findCredential(WIFI_STORE.getLastConnectedSsid())) return;
 
   GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(cred->ssid.c_str(), cred->password.c_str());
-  const unsigned long joinDeadline = millis() + 10000;
-  while (WiFi.status() != WL_CONNECTED && millis() < joinDeadline) {
-    delay(100);
-  }
-  if (WiFi.status() == WL_CONNECTED) {
-    trustedtime::startSync();  // snap the clock floor while the network is up
+  if (joinLastWifiForSleep()) {
     pluginevents::drain(&renderer);
   } else {
-    LOG_DBG("MAIN", "Sleep-event WiFi join timed out; deferring delivery");
+    LOG_DBG("MAIN", "Sleep-event WiFi join failed; deferring delivery");
   }
+}
+
+// Sync Progress on Sleep: pushes the book the reader captured in
+// prepareForSleep(), behind the sleep screen. Skipped on low battery, out of
+// range of the last network, or when the position has not moved since the
+// last push, so an idle wake/sleep cycle never turns the radio on.
+static void pushSleepProgress() {
+  if (!kosync_sleep::pending()) return;
+  if (powerManager.getBatteryPercentage() < 20) return;
+  if (WiFi.status() != WL_CONNECTED && !joinLastWifiForSleep()) return;
+  kosync_sleep::push(renderer);
 }
 
 // Enter deep sleep mode
@@ -418,6 +443,9 @@ void enterDeepSleep(bool fromTimeout = false) {
     // A stale Quick Resume frame must not replace the selected sleep screen during wake.
     Storage.remove(SLEEP_FRAME_FILE);
   }
+
+  // After the Quick Resume save: the push lends the framebuffer.
+  pushSleepProgress();
 
   // Tear down WiFi so the modem power domain isn't held alive across deep sleep.
   // Wake from deep sleep is effectively a chip reset, so no state needs to survive.

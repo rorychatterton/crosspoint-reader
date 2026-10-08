@@ -60,4 +60,18 @@ inline bool preferAlternate(bool primaryOk, bool primaryNotFound, float primaryP
   return altPct > primaryPct;
 }
 
+// Unattended push on the way into sleep (Sync Progress on Sleep). It never
+// applies anything, so a record another device synced further on is left for
+// a manual pull; this device's own record is always overwritten, so reading
+// backwards still syncs. A non-finite remote percentage cannot be ahead.
+enum class SleepPush : uint8_t { Upload, RemoteAhead, LookupFailed };
+
+inline SleepPush decideSleepPush(Lookup remote, bool ownRecord, float local, float remotePct, float margin = 0.002f) {
+  if (remote == Lookup::Failed) return SleepPush::LookupFailed;
+  if (remote == Lookup::Found && !ownRecord && std::isfinite(remotePct) && remotePct > local + margin) {
+    return SleepPush::RemoteAhead;
+  }
+  return SleepPush::Upload;
+}
+
 }  // namespace koreader_sync

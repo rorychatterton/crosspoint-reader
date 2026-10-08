@@ -18,7 +18,7 @@ namespace {
 const StrId menuNames[KOReaderSettingsActivity::MENU_ITEMS] = {
     StrId::STR_USERNAME,    StrId::STR_PASSWORD,          StrId::STR_SYNC_SERVER_URL, StrId::STR_SERVER_TYPE,
     StrId::STR_USE_TAILNET, StrId::STR_DOCUMENT_MATCHING, StrId::STR_SEND_METADATA,   StrId::STR_SYNC_BEHAVIOR,
-    StrId::STR_SIGN_UP,     StrId::STR_AUTHENTICATE};
+    StrId::STR_SYNC_ON_SLEEP, StrId::STR_SIGN_UP,       StrId::STR_AUTHENTICATE};
 }  // namespace
 
 KOReaderSettingsActivity::KOReaderSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
@@ -107,11 +107,15 @@ void KOReaderSettingsActivity::activateIndex(const int index) {
     KOREADER_STORE.saveToFile();
     requestUpdate();
   } else if (index == 8) {
+    KOREADER_STORE.setSyncOnSleep(!KOREADER_STORE.getSyncOnSleep());
+    KOREADER_STORE.saveToFile();
+    requestUpdate();
+  } else if (index == 9) {
     if (!KOREADER_STORE.hasCredentials()) return;
     startActivityForResult(
         std::make_unique<KOReaderAuthActivity>(renderer, mappedInput, KOReaderAuthActivity::Mode::SIGN_UP),
         [](const ActivityResult&) {});
-  } else if (index == 9) {
+  } else if (index == 10) {
     if (!KOREADER_STORE.hasCredentials()) return;
     startActivityForResult(std::make_unique<KOReaderAuthActivity>(renderer, mappedInput), [](const ActivityResult&) {});
   }
@@ -147,7 +151,7 @@ void KOReaderSettingsActivity::buildScreen(UiScreen& screen) {
       rowValues_[i] = type == KOReaderServerType::CROSSPOINT ? tr(STR_CROSSPOINT)
                       : type == KOReaderServerType::KOSYNC   ? tr(STR_KOSYNC)
                                                              : tr(STR_OTHER);
-    } else if (i == 4 || i == 6) {
+    } else if (i == 4 || i == 6 || i == 8) {
       rowValues_[i].clear();  // checkbox rows
     } else if (i == 5) {
       rowValues_[i] =
@@ -162,6 +166,7 @@ void KOReaderSettingsActivity::buildScreen(UiScreen& screen) {
   }
   GUI.setCheckboxRow(rowItems_[4], KOREADER_STORE.getUseTailnet());
   GUI.setCheckboxRow(rowItems_[6], KOREADER_STORE.getSendMetadata());
+  GUI.setCheckboxRow(rowItems_[8], KOREADER_STORE.getSyncOnSleep());
 
   fui::ListProps props;
   props.items = rowItems_;

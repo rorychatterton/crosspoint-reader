@@ -41,6 +41,7 @@ class KOReaderCredentialStore : public PersistableStore<KOReaderCredentialStore>
   bool sendMetadata = true;                                         // Send document metadata with progress sync
   KOReaderSyncBehavior syncBehavior = KOReaderSyncBehavior::SMART;
   KOReaderServerType serverType = KOReaderServerType::CROSSPOINT;
+  bool syncOnSleep = false;  // Push reader progress on the way into sleep
 
   // Private constructor for singleton
   KOReaderCredentialStore() = default;
@@ -93,6 +94,9 @@ class KOReaderCredentialStore : public PersistableStore<KOReaderCredentialStore>
   // Sync behavior
   void setSyncBehavior(KOReaderSyncBehavior behavior);
   KOReaderSyncBehavior getSyncBehavior() const { return syncBehavior; }
+
+  void setSyncOnSleep(bool enabled) { syncOnSleep = enabled; }
+  bool getSyncOnSleep() const { return syncOnSleep; }
 };
 
 // Helper macro to access credential store

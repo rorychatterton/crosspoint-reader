@@ -32,6 +32,7 @@
 #include "EpubReaderPercentSelectionActivity.h"
 #include "EpubReaderUtils.h"
 #include "KOReaderCredentialStore.h"
+#include "KOReaderSleepSync.h"
 #include "KOReaderSyncActivity.h"
 #include "MappedInputManager.h"
 #include "ProgressMapper.h"
@@ -2870,6 +2871,13 @@ void EpubReaderActivity::updateBookmarkFlag() {
   currentPageBookmarked = std::any_of(cachedBookmarks.begin(), cachedBookmarks.end(), [&](const BookmarkEntry& b) {
     return bookmarkMatchesProgress(b, currentSpineIndex, section->currentPage, pageCount, pageRange);
   });
+}
+
+void EpubReaderActivity::prepareForSleep() {
+  ReaderActivity::prepareForSleep();
+  if (!epub) return;
+  RenderLock lock;
+  kosync_sleep::capture(epub->getPath(), getCurrentPosition());
 }
 
 ScreenshotInfo EpubReaderActivity::getScreenshotInfo() const {

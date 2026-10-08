@@ -114,6 +114,9 @@ class KOReaderSyncClient {
    */
   static Error updateProgress(const KOReaderProgress& progress);
 
+  /** True when progress was uploaded by a CrossPoint device. */
+  static bool isOwnRecord(const KOReaderProgress& progress);
+
   /**
    * Get human-readable error message.
    */

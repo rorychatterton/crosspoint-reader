@@ -281,6 +281,8 @@ KOReaderSyncClient::Error KOReaderSyncClient::updateProgress(const KOReaderProgr
   return SERVER_ERROR;
 }
 
+bool KOReaderSyncClient::isOwnRecord(const KOReaderProgress& progress) { return progress.deviceId == DEVICE_ID; }
+
 const char* KOReaderSyncClient::errorString(Error error) {
   switch (error) {
     case OK:

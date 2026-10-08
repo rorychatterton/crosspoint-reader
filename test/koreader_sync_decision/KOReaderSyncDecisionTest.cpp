@@ -139,3 +139,38 @@ TEST(UploadInFetchWindow, FailedLookupKeepsSeparateDecision) {
   EXPECT_FALSE(uploadInFetchWindow(/*smart=*/true, Lookup::NotFound, Lookup::Failed));
   EXPECT_FALSE(uploadInFetchWindow(/*smart=*/true, Lookup::Failed, Lookup::Skipped));
 }
+
+// --- decideSleepPush -------------------------------------------------------
+
+using koreader_sync::decideSleepPush;
+using koreader_sync::SleepPush;
+
+TEST(DecideSleepPush, NoRecordUploads) {
+  EXPECT_EQ(decideSleepPush(Lookup::NotFound, false, 0.05f, 0.0f), SleepPush::Upload);
+}
+
+TEST(DecideSleepPush, FailedLookupDoesNotUpload) {
+  EXPECT_EQ(decideSleepPush(Lookup::Failed, false, 0.05f, 0.0f), SleepPush::LookupFailed);
+}
+
+TEST(DecideSleepPush, OtherDeviceBehindUploads) {
+  EXPECT_EQ(decideSleepPush(Lookup::Found, false, 0.06f, 0.044f), SleepPush::Upload);
+}
+
+// The live case: the Kindle read on to 4.42% while the X3 sat at 3.94%.
+TEST(DecideSleepPush, OtherDeviceAheadIsLeftForPull) {
+  EXPECT_EQ(decideSleepPush(Lookup::Found, false, 0.039434f, 0.0442f), SleepPush::RemoteAhead);
+}
+
+TEST(DecideSleepPush, OtherDeviceAheadWithinMarginUploads) {
+  EXPECT_EQ(decideSleepPush(Lookup::Found, false, 0.5f, 0.5015f), SleepPush::Upload);
+}
+
+TEST(DecideSleepPush, OwnRecordAheadIsOverwritten) {
+  EXPECT_EQ(decideSleepPush(Lookup::Found, true, 0.03f, 0.2f), SleepPush::Upload);
+}
+
+TEST(DecideSleepPush, NonFiniteRemoteUploads) {
+  EXPECT_EQ(decideSleepPush(Lookup::Found, false, 0.5f, kNan), SleepPush::Upload);
+  EXPECT_EQ(decideSleepPush(Lookup::Found, false, 0.5f, kInf), SleepPush::Upload);
+}
