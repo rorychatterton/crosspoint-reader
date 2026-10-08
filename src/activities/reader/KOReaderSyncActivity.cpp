@@ -195,10 +195,15 @@ void KOReaderSyncActivity::performSync() {
     return;
   }
   auto result = netResult;
+  // False once the record in use came from the alternate document id: the primary
+  // record is then missing or behind and needs this position even when the
+  // positions already match.
+  bool remoteIsPrimary = true;
 
   if (result == KOReaderSyncClient::NOT_FOUND && hasAlternateProgress) {
     remoteProgress = std::move(alternateProgress);
     hasAlternateProgress = false;
+    remoteIsPrimary = false;
     result = KOReaderSyncClient::OK;
   }
 
@@ -271,6 +276,7 @@ void KOReaderSyncActivity::performSync() {
                              alternateProgress.percentage) == RemoteRecordChoice::Alternate) {
         remoteProgress = std::move(alternateProgress);
         remotePosition = alternatePosition;
+        remoteIsPrimary = false;
         LOG_DBG("KOSync", "Selected alternate remote record after mapped-position comparison");
       } else {
         LOG_DBG("KOSync", "Kept primary remote record after mapped-position comparison");
@@ -286,6 +292,12 @@ void KOReaderSyncActivity::performSync() {
             remoteProgress.progress.c_str(), remotePosition.spineIndex, remotePosition.pageNumber);
     switch (comparison) {
       case ProgressComparison::Synchronized:
+        if (!remoteIsPrimary) {
+          LOG_DBG("KOSync", "Smart sync: positions match the alternate record; healing the primary record");
+          documentHash = primaryHash;
+          performUpload();
+          return;
+        }
         completeAlreadySynced();
         return;
       case ProgressComparison::LocalAhead:
