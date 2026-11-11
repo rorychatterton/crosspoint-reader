@@ -32,7 +32,6 @@
 #include "EpubReaderPercentSelectionActivity.h"
 #include "EpubReaderUtils.h"
 #include "KOReaderCredentialStore.h"
-#include "KOReaderSleepSync.h"
 #include "KOReaderSyncActivity.h"
 #include "MappedInputManager.h"
 #include "ProgressMapper.h"
@@ -406,10 +405,6 @@ void EpubReaderActivity::loop() {
   }
 
   rememberBookOnceRendered();
-
-  // Booted by a tailnet sync that needed a fresh heap: run it again once the
-  // page it syncs from is on screen.
-  if (lastRenderCompleteMs != 0 && consumeKoSyncResume() && launchKOReaderSync()) return;
 
   // Someone else turned the screen while this reader was stacked (the control
   // center's orientation tile). Reflow before the next render, or the page
@@ -2871,13 +2866,6 @@ void EpubReaderActivity::updateBookmarkFlag() {
   currentPageBookmarked = std::any_of(cachedBookmarks.begin(), cachedBookmarks.end(), [&](const BookmarkEntry& b) {
     return bookmarkMatchesProgress(b, currentSpineIndex, section->currentPage, pageCount, pageRange);
   });
-}
-
-void EpubReaderActivity::prepareForSleep() {
-  ReaderActivity::prepareForSleep();
-  if (!epub) return;
-  RenderLock lock;
-  kosync_sleep::capture(epub->getPath(), getCurrentPosition());
 }
 
 ScreenshotInfo EpubReaderActivity::getScreenshotInfo() const {

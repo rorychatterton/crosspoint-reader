@@ -14,18 +14,16 @@
 #include "Epub/Section.h"
 #include "EpubReaderUtils.h"
 #include "KOReaderCredentialStore.h"
-#include "KOReaderProgressPayload.h"
+#include "KOReaderDocumentId.h"
 #include "MappedInputManager.h"
 #include "ProgressComparison.h"
 #include "ReaderUtils.h"
 #include "SilentRestart.h"
-#include "SyncDecision.h"
 #include "activities/ActivityManager.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "components/UiAppHelpers.h"  // list icons for the compare rows
 #include "fontIds.h"
-#include "network/TailnetSession.h"
 #include "network/WifiPowerSaveGuard.h"
 
 namespace fui = freeink::ui;
@@ -36,18 +34,17 @@ namespace {
 // disambiguates them in the handler.
 constexpr fui::ActionId ACTION_ROW = 1;
 
+std::string calculateDocumentHashForMethod(const std::string& path, const DocumentMatchMethod method) {
+  return method == DocumentMatchMethod::FILENAME ? KOReaderDocumentId::calculateFromFilename(path)
+                                                 : KOReaderDocumentId::calculate(path);
+}
+
 DocumentMatchMethod alternateMatchMethod(const DocumentMatchMethod method) {
   return method == DocumentMatchMethod::FILENAME ? DocumentMatchMethod::BINARY : DocumentMatchMethod::FILENAME;
 }
 
 const char* matchMethodName(const DocumentMatchMethod method) {
   return method == DocumentMatchMethod::FILENAME ? "filename" : "binary";
-}
-
-koreader_sync::Lookup toLookup(const KOReaderSyncClient::Error result) {
-  if (result == KOReaderSyncClient::OK) return koreader_sync::Lookup::Found;
-  if (result == KOReaderSyncClient::NOT_FOUND) return koreader_sync::Lookup::NotFound;
-  return koreader_sync::Lookup::Failed;
 }
 
 }  // namespace
@@ -131,7 +128,6 @@ void KOReaderSyncActivity::onWifiSelectionComplete(const bool success) {
   WiFi.setSleep(false);
   LOG_DBG("KOSync", "WiFi sleep disabled for sync");
 
-  // Tailnet sessions are brought up around each network call (overTailnet).
   {
     RenderLock lock(*this);
     state = SYNCING;
@@ -144,8 +140,9 @@ void KOReaderSyncActivity::onWifiSelectionComplete(const bool success) {
 }
 
 void KOReaderSyncActivity::performSync() {
+  WifiPowerSaveGuard psGuard;
   const DocumentMatchMethod primaryMethod = KOREADER_STORE.getMatchMethod();
-  documentHash = koreaderDocumentHash(epubPath, primaryMethod);
+  documentHash = calculateDocumentHashForMethod(epubPath, primaryMethod);
   if (documentHash.empty()) {
     {
       RenderLock lock(*this);
@@ -158,16 +155,6 @@ void KOReaderSyncActivity::performSync() {
   const std::string primaryHash = documentHash;
 
   LOG_DBG("KOSync", "Document hash (%s): %s", matchMethodName(primaryMethod), documentHash.c_str());
-  // Smart mode also probes the alternate document-id method; hashed here,
-  // before the network window, since it reads the EPUB from SD.
-  altDocumentHash.clear();
-  if (smartSyncEnabled()) {
-    altDocumentHash = koreaderDocumentHash(epubPath, alternateMatchMethod(primaryMethod));
-    // Built here so fetchRemoteProgressOp can upload in the same window when
-    // no remote record exists; the window cannot load the Epub.
-    buildUploadPayload();
-    epub.reset();
-  }
 
   {
     RenderLock lock(*this);
@@ -175,36 +162,41 @@ void KOReaderSyncActivity::performSync() {
   }
   requestUpdateAndWait();
 
-  // Fetch remote progress (and, in smart mode, the alternate document-id
-  // record) inside the tunnel window. The alternate record is retained until
-  // both records can be mapped after the Epub is reloaded.
-  bool tunnelOk;
-  {
-    // Restore power-save before finishUpload stops the radio; set_ps on a stopped radio fails.
-    WifiPowerSaveGuard psGuard;
-    tunnelOk = overTailnet(&KOReaderSyncActivity::fetchRemoteProgressOp);
+  // Fetch remote progress. In smart mode, retain the alternate document-id
+  // record until both records can be mapped after the Epub is reloaded.
+  auto result = KOReaderSyncClient::getProgress(documentHash, remoteProgress);
+  LOG_DBG("KOSync", "Primary remote (%s): result=%d http=%d doc=%s local=%.6f remote=%.6f xpath=%s",
+          matchMethodName(primaryMethod), result, KOReaderSyncClient::lastHttpCode, documentHash.c_str(),
+          localProgress.percentage, remoteProgress.percentage, remoteProgress.progress.c_str());
+
+  KOReaderProgress alternateProgress;
+  bool hasAlternateProgress = false;
+  if (smartSyncEnabled()) {
+    const DocumentMatchMethod altMethod = alternateMatchMethod(primaryMethod);
+    const std::string altHash = calculateDocumentHashForMethod(epubPath, altMethod);
+    if (!altHash.empty() && altHash != documentHash) {
+      KOReaderProgress altProgress;
+      const auto altResult = KOReaderSyncClient::getProgress(altHash, altProgress);
+      LOG_DBG("KOSync", "Alternate remote (%s): result=%d http=%d doc=%s local=%.6f remote=%.6f xpath=%s",
+              matchMethodName(altMethod), altResult, KOReaderSyncClient::lastHttpCode, altHash.c_str(),
+              localProgress.percentage, altProgress.percentage, altProgress.progress.c_str());
+
+      if (altResult == KOReaderSyncClient::OK) {
+        alternateProgress = std::move(altProgress);
+        hasAlternateProgress = true;
+      }
+    }
   }
-  if (!tunnelOk) return;  // tunnel failed; status shown
-  if (uploadedInFetchWindow) {
-    finishUpload(uploadResult);
-    return;
-  }
-  auto result = netResult;
-  // False once the record in use came from the alternate document id: the primary
-  // record is then missing or behind and needs this position even when the
-  // positions already match.
-  bool remoteIsPrimary = true;
 
   if (result == KOReaderSyncClient::NOT_FOUND && hasAlternateProgress) {
     remoteProgress = std::move(alternateProgress);
     hasAlternateProgress = false;
-    remoteIsPrimary = false;
     result = KOReaderSyncClient::OK;
   }
 
   if (result == KOReaderSyncClient::NOT_FOUND) {
     if (smartSyncEnabled()) {
-      LOG_DBG("KOSync", "Smart sync: no primary record and the alternate lookup failed; uploading local %.6f",
+      LOG_DBG("KOSync", "Smart sync: no remote progress found for known document hashes; uploading local %.6f",
               localProgress.percentage);
       performUpload();
       return;
@@ -271,7 +263,6 @@ void KOReaderSyncActivity::performSync() {
                              alternateProgress.percentage) == RemoteRecordChoice::Alternate) {
         remoteProgress = std::move(alternateProgress);
         remotePosition = alternatePosition;
-        remoteIsPrimary = false;
         LOG_DBG("KOSync", "Selected alternate remote record after mapped-position comparison");
       } else {
         LOG_DBG("KOSync", "Kept primary remote record after mapped-position comparison");
@@ -287,18 +278,9 @@ void KOReaderSyncActivity::performSync() {
             remoteProgress.progress.c_str(), remotePosition.spineIndex, remotePosition.pageNumber);
     switch (comparison) {
       case ProgressComparison::Synchronized:
-        if (!remoteIsPrimary) {
-          LOG_DBG("KOSync", "Smart sync: positions match the alternate record; healing the primary record");
-          documentHash = primaryHash;
-          performUpload();
-          return;
-        }
         completeAlreadySynced();
         return;
       case ProgressComparison::LocalAhead:
-        // Alternate hashes are only probes for newer remote state. Keep uploads
-        // on the configured matching method so its primary record heals.
-        documentHash = primaryHash;
         performUpload();
         return;
       case ProgressComparison::RemoteAhead:
@@ -328,30 +310,76 @@ void KOReaderSyncActivity::performUpload() {
   }
   requestUpdateAndWait();
 
-  if (!uploadPayloadReady) buildUploadPayload();
-  // Release the Epub before the network call so the TLS handshake has enough free heap.
+  // localProgress was pre-computed in EpubReaderActivity before the Epub was released.
+  KOReaderProgress progress;
+  progress.document = documentHash;
+  progress.progress = localProgress.xpath;
+  progress.percentage = localProgress.percentage;
+
+  // Rich position for server profiles that explicitly support the CrossPoint extension.
+  // The HTTP client enforces the same boundary before serializing the extension.
+  if (KOREADER_STORE.supportsRichProgress()) {
+    KOReaderRichPosition pos;
+    const float pct = localProgress.percentage < 0.0f   ? 0.0f
+                      : localProgress.percentage > 1.0f ? 1.0f
+                                                        : localProgress.percentage;
+    pos.pctQ = static_cast<uint32_t>(pct * 1000000.0f + 0.5f);
+    pos.spineIndex = static_cast<uint16_t>(localPosition.spineIndex);
+    pos.pageNumber = static_cast<uint16_t>(localPosition.pageNumber);
+    pos.totalPages = static_cast<uint16_t>(localPosition.totalPages > 0 ? localPosition.totalPages : 1);
+    if (localPosition.hasParagraphIndex) {
+      pos.paragraphIndex = localPosition.paragraphIndex;
+    }
+    pos.xpath = localProgress.xpath;
+    progress.position = std::move(pos);
+  }
+
+  // Optionally include document metadata (KOReader PR #15306)
+  if (KOREADER_STORE.getSendMetadata()) {
+    // The Epub is released before the sync network calls and is only reloaded on the
+    // remote-progress path (performSync). When uploading from NO_REMOTE_PROGRESS the
+    // Epub is still null, so reload it here and guard the title/author reads to avoid
+    // dereferencing a null Epub. Filename is derived from the path and is always safe.
+    ensureEpubLoaded();
+    KOReaderMetadata meta;
+    const auto lastSlash = epubPath.rfind('/');
+    meta.filename = (lastSlash != std::string::npos) ? epubPath.substr(lastSlash + 1) : epubPath;
+    if (epub) {
+      meta.title = epub->getTitle();
+      meta.authors = epub->getAuthor();
+      if (KOREADER_STORE.supportsExtendedMetadata()) {
+        Epub::SyncMetadata syncMetadata;
+        if (epub->loadSyncMetadata(syncMetadata)) {
+          meta.isbn = std::move(syncMetadata.isbn);
+          meta.asin = std::move(syncMetadata.asin);
+          meta.series = std::move(syncMetadata.series);
+          meta.seriesIndex = syncMetadata.seriesIndex;
+        } else {
+          LOG_DBG("KOSync", "Could not read extended EPUB metadata; sending core metadata only");
+        }
+      }
+    } else {
+      LOG_ERR("KOSync", "Epub unavailable for metadata; sending filename only");
+    }
+    // Plugin sidecar fields ("<book>.meta.json", written at download time via
+    // the catalog sidecar mechanism or /api/plugin-fs) ride along so a custom
+    // sync server can route progress by a service book id.
+    // A missing sidecar (the common case) leaves extraJson empty.
+    Storage.readFileToString("KOSync", epubPath + ".meta.json", 2 * 1024, meta.extraJson);
+    progress.metadata = std::move(meta);
+  }
+
+  // Release the Epub before the network call so the TLS handshake has enough free heap
+  // (consistent with the release-before-sync pattern in performSync); nothing below needs it.
   epub.reset();
 
-  bool tunnelOk;
+  KOReaderSyncClient::Error result;
   {
-    // Restore power-save before finishUpload stops the radio; set_ps on a stopped radio fails.
+    // Restore power-save before esp_wifi_stop below; set_ps on a stopped radio fails.
     WifiPowerSaveGuard psGuard;
-    tunnelOk = overTailnet(&KOReaderSyncActivity::uploadProgressOp);
+    result = KOReaderSyncClient::updateProgress(progress);
   }
-  if (!tunnelOk) return;  // tunnel failed; status shown
-  finishUpload(netResult);
-}
 
-// Fills uploadPayload from the local position. localProgress was pre-computed
-// in EpubReaderActivity before the Epub was released; metadata loads the Epub
-// (callers release it before the next tunnel window).
-void KOReaderSyncActivity::buildUploadPayload() {
-  if (KOREADER_STORE.getSendMetadata()) ensureEpubLoaded();
-  uploadPayload = buildKOReaderProgressPayload(documentHash, localProgress, localPosition, epubPath, epub.get());
-  uploadPayloadReady = true;
-}
-
-void KOReaderSyncActivity::finishUpload(const KOReaderSyncClient::Error result) {
   // Drop the radio while user reads the result; full teardown happens at silent reboot.
   esp_wifi_stop();
 
@@ -406,10 +434,8 @@ void KOReaderSyncActivity::onEnter() {
 
 void KOReaderSyncActivity::onExit() {
   Activity::onExit();
-  KOReaderSyncClient::clearBaseUrlOverride();
 
   if (wifiActivated) {
-    if (TAILNET.wasActive()) TAILNET.teardown();
     WiFi.disconnect(false);
     delay(30);
     silentRestartToReader();
@@ -426,7 +452,9 @@ void KOReaderSyncActivity::chooseResultOption() {
 
 void KOReaderSyncActivity::startUpload() {
   if (documentHash.empty()) {
-    documentHash = koreaderDocumentHash(epubPath, KOREADER_STORE.getMatchMethod());
+    documentHash = KOREADER_STORE.getMatchMethod() == DocumentMatchMethod::FILENAME
+                       ? KOReaderDocumentId::calculateFromFilename(epubPath)
+                       : KOReaderDocumentId::calculate(epubPath);
   }
   performUpload();
 }
@@ -652,8 +680,7 @@ void KOReaderSyncActivity::render(RenderLock&&) {
 
   if (state == SYNC_FAILED) {
     UITheme::drawCenteredText(renderer, screen, UI_10_FONT_ID, top, tr(STR_SYNC_FAILED_MSG), true, EpdFontFamily::BOLD);
-    UITheme::drawCenteredWrappedText(renderer, Rect{screen.x + 16, top + 40, screen.width - 32, 100}, UI_10_FONT_ID,
-                                     statusMessage.c_str(), 4);
+    UITheme::drawCenteredText(renderer, screen, UI_10_FONT_ID, top + 40, statusMessage.c_str());
 
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
@@ -717,105 +744,3 @@ void KOReaderSyncActivity::loop() {
     return;
   }
 }
-
-bool KOReaderSyncActivity::overTailnet(void (KOReaderSyncActivity::*op)()) {
-  if (!KOREADER_STORE.getUseTailnet()) {
-    (this->*op)();
-    return true;
-  }
-  // Same memory model as the OPDS browser: the tunnel and its TLS sessions
-  // need the framebuffer's 48 KB, so the panel keeps its last frame while the
-  // framebuffer is lent to the heap, and the tunnel is torn down before the
-  // framebuffer is reclaimed. op must not render. Progress is either already
-  // on SD or not yet changed, so a failed reclaim reboots straight back into
-  // the reader without painting.
-  // The target is set before the release: the session keeps the host string
-  // past teardown, and it must not sit inside the framebuffer's region.
-  std::string baseUrl = KOREADER_STORE.getBaseUrl();
-  TAILNET.setTargetUrl(baseUrl);
-  KOReaderSyncClient::reserveBaseUrlOverride(baseUrl.size() + 32);  // storage outlives the window
-  bool up = false;
-  {
-    RenderLock lock;
-    TailnetSession::prepareCallerTask();
-    renderer.releaseFrameBufferToHeap();
-    LOG_INF("KOSync", "tailnet window released free=%u largest=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
-    if (TAILNET.ensureUp() && !(baseUrl = TAILNET.rewriteUrlForTailnet(baseUrl)).empty()) {
-      up = true;
-      LOG_INF("KOSync", "tailnet window up free=%u largest=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
-      KOReaderSyncClient::setBaseUrlOverride(baseUrl);
-      (this->*op)();
-      LOG_INF("KOSync", "tailnet window done free=%u largest=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
-    }
-    TAILNET.teardown();
-    LOG_INF("KOSync", "tailnet window torn down free=%u largest=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
-    // Frees queued on the tcpip/WiFi tasks can land after teardown returns.
-    bool reclaimed = false;
-    for (int attempt = 0; attempt < 10 && !reclaimed; attempt++) {
-      if (attempt) delay(200);
-      reclaimed = renderer.reacquireFrameBufferFromHeap();
-    }
-    LOG_INF("KOSync", "tailnet window reclaim=%s free=%u largest=%u", reclaimed ? "OK" : "FAIL", ESP.getFreeHeap(),
-            ESP.getMaxAllocHeap());
-    if (!reclaimed) {
-      LOG_ERR("KOSync", "Framebuffer not reclaimable after tailnet sync; rebooting into the reader");
-      silentRestartToReader(/*paint=*/false);
-      for (;;) delay(1000);  // ESP.restart() does not return
-    }
-  }
-  if (!up && TAILNET.needsReboot()) {
-    // A failed warm start left no room for the cold one; the reader reopens
-    // after the reboot and runs the sync again, cold. Returns only when
-    // sleep supersedes the reboot, and then the error is shown below.
-    LOG_ERR("KOSync", "Tailnet needs a fresh heap; rebooting to repeat the sync");
-    silentRestartToReaderSync();
-  }
-  if (!up) {
-    {
-      RenderLock lock(*this);
-      state = SYNC_FAILED;
-      statusMessage = std::string(TAILNET.lastErrorCode()) + ": " + TAILNET.lastErrorMessage();
-    }
-    requestUpdate(true);
-  }
-  return up;
-}
-
-// Fetch remote progress into remoteProgress/netResult. In smart mode, also
-// probe the alternate document-id method and retain that record in
-// alternateProgress: performSync() maps both after the Epub is reloaded and
-// picks the furthest, so a stale local upload never clobbers progress another
-// KOReader device synced under the other matching method. When neither id has
-// a record, smart mode uploads the prepared payload here, in the same window.
-void KOReaderSyncActivity::fetchRemoteProgressOp() {
-  const DocumentMatchMethod primaryMethod = KOREADER_STORE.getMatchMethod();
-  hasAlternateProgress = false;
-  uploadedInFetchWindow = false;
-  netResult = KOReaderSyncClient::getProgress(documentHash, remoteProgress);
-  LOG_DBG("KOSync", "Primary remote (%s): result=%d http=%d doc=%s local=%.6f remote=%.6f xpath=%s",
-          matchMethodName(primaryMethod), netResult, KOReaderSyncClient::lastHttpCode, documentHash.c_str(),
-          localProgress.percentage, remoteProgress.percentage, remoteProgress.progress.c_str());
-
-  koreader_sync::Lookup altLookup = koreader_sync::Lookup::Skipped;
-  if (!altDocumentHash.empty() && altDocumentHash != documentHash) {
-    KOReaderProgress altProgress;
-    const auto altResult = KOReaderSyncClient::getProgress(altDocumentHash, altProgress);
-    LOG_DBG("KOSync", "Alternate remote (%s): result=%d http=%d doc=%s local=%.6f remote=%.6f xpath=%s",
-            matchMethodName(alternateMatchMethod(primaryMethod)), altResult, KOReaderSyncClient::lastHttpCode,
-            altDocumentHash.c_str(), localProgress.percentage, altProgress.percentage, altProgress.progress.c_str());
-    altLookup = toLookup(altResult);
-    if (altResult == KOReaderSyncClient::OK) {
-      alternateProgress = std::move(altProgress);
-      hasAlternateProgress = true;
-    }
-  }
-
-  if (uploadPayloadReady && koreader_sync::uploadInFetchWindow(smartSyncEnabled(), toLookup(netResult), altLookup)) {
-    LOG_DBG("KOSync", "Smart sync: no remote progress for known document hashes; uploading local %.6f",
-            localProgress.percentage);
-    uploadResult = KOReaderSyncClient::updateProgress(uploadPayload);
-    uploadedInFetchWindow = true;
-  }
-}
-
-void KOReaderSyncActivity::uploadProgressOp() { netResult = KOReaderSyncClient::updateProgress(uploadPayload); }

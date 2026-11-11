@@ -72,32 +72,13 @@ class KOReaderSyncActivity final : public Activity, private UiAppHost {
 
   // Tracks whether this session activated WiFi. Set in onEnter past the credentials
   // check; checked in onExit to decide whether to silent-reboot. Can't rely on
-  // WiFi.getMode() because finishUpload() calls esp_wifi_stop() on the way out,
+  // WiFi.getMode() because performUpload() calls esp_wifi_stop() on the way out,
   // which makes WiFi.getMode() return WIFI_MODE_NULL.
   bool wifiActivated = false;
 
   void onWifiSelectionComplete(bool success);
   void performSync();
   void performUpload();
-  // Runs op with the tunnel up and the framebuffer lent to the heap (tailnet
-  // only; otherwise op runs directly). False = tunnel failed, status set.
-  bool overTailnet(void (KOReaderSyncActivity::*op)());
-  void fetchRemoteProgressOp();
-  void uploadProgressOp();
-  KOReaderSyncClient::Error netResult = KOReaderSyncClient::OK;
-  std::string altDocumentHash;  // smart mode: alternate matching method probe
-  // Alternate-method record fetched alongside the primary one (smart mode);
-  // compared against it once both are mapped after the Epub is reloaded.
-  KOReaderProgress alternateProgress;
-  bool hasAlternateProgress = false;
-  KOReaderProgress uploadPayload;
-  bool uploadPayloadReady = false;
-  // Smart mode with no remote record: fetchRemoteProgressOp uploaded in the
-  // fetch window, with uploadResult as the outcome.
-  bool uploadedInFetchWindow = false;
-  KOReaderSyncClient::Error uploadResult = KOReaderSyncClient::OK;
-  void buildUploadPayload();
-  void finishUpload(KOReaderSyncClient::Error result);
   bool smartSyncEnabled() const;
   void markAutoReturn();
   void completeAlreadySynced();

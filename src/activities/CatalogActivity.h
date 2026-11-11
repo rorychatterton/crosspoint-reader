@@ -35,8 +35,6 @@ class CatalogActivity : public UiListActivity {
   State state = State::LOADING;
   std::string errorMessage, statusMessage;
   size_t downloadProgress = 0, downloadTotal = 0;
-  // Shown in place of the byte count while no progress can be drawn; empty = none.
-  char downloadNote[64] = {};
   bool cancelDownload = false;
 
   virtual void startBrowse() = 0;
@@ -62,9 +60,6 @@ class CatalogActivity : public UiListActivity {
   void launchSearch();
   void beginDownload(const std::string& title);
   void finishDownload(HttpDownloader::DownloadError result);
-  // Input pump for a blocking transfer: Back cancels; the home gesture cancels
-  // and finishDownload() then exits home.
-  void pollDownloadCancel();
   HttpDownloader::DownloadError downloadFile(const std::string& url, const std::string& dest,
                                              const std::string& user = {}, const std::string& password = {},
                                              const std::vector<HttpDownloader::Header>& headers = {});

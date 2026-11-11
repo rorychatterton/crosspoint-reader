@@ -14,7 +14,6 @@ void OpdsServerStore::toJson(JsonDocument& doc) const {
     obj["url"] = server.url;
     obj["username"] = server.username;
     obj["password_obf"] = obfuscation::obfuscateToBase64(server.password);
-    obj["tailnet"] = server.useTailnet;
   }
 }
 
@@ -33,7 +32,6 @@ bool OpdsServerStore::fromJson(JsonVariantConst doc) {
     server.url = obj["url"] | "";
     server.username = obj["username"] | "";
     server.password = extractPassword(obj, needsResave);
-    server.useTailnet = obj["tailnet"] | false;
     servers.push_back(std::move(server));
   }
 

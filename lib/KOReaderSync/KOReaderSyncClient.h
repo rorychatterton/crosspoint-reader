@@ -81,8 +81,7 @@ class KOReaderSyncClient {
     JSON_ERROR,
     NOT_FOUND,
     LOW_MEMORY,
-    USER_EXISTS,
-    TAILNET_ERROR
+    USER_EXISTS
   };
 
   /**
@@ -114,20 +113,10 @@ class KOReaderSyncClient {
    */
   static Error updateProgress(const KOReaderProgress& progress);
 
-  /** True when progress was uploaded by a CrossPoint device. */
-  static bool isOwnRecord(const KOReaderProgress& progress);
-
   /**
    * Get human-readable error message.
    */
   static const char* errorString(Error error);
-
-  /** Override the configured base URL for the current activity session. */
-  static void setBaseUrlOverride(const std::string& url);
-  // Pre-size the override before a framebuffer-release window so its storage
-  // is not allocated inside the released region (it outlives the window).
-  static void reserveBaseUrlOverride(size_t capacity);
-  static void clearBaseUrlOverride();
 
   /** HTTP status code from the last request (for diagnostics). */
   static int lastHttpCode;

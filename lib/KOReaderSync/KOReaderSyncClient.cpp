@@ -9,7 +9,6 @@
 #include <string>
 
 #include "KOReaderCredentialStore.h"
-#include "ProgressResponseParser.h"
 
 int KOReaderSyncClient::lastHttpCode = 0;
 
@@ -24,9 +23,6 @@ constexpr char DEVICE_ID[] = "crosspoint-reader";
 // guarantee that a handshake will fit.
 constexpr uint32_t MIN_FREE_FOR_TLS = 35000;
 constexpr uint32_t MIN_BLOCK_FOR_TLS = 20000;
-std::string baseUrlOverride;
-
-std::string effectiveBaseUrl() { return baseUrlOverride.empty() ? KOREADER_STORE.getBaseUrl() : baseUrlOverride; }
 
 // Apply the shared KOSync auth headers after begin(). x-auth-* is the native
 // KOSync scheme; Basic auth is added for Calibre-Web-Automated compatibility.
@@ -50,13 +46,7 @@ bool insufficientHeap() {
   }
   return false;
 }
-
 }  // namespace
-
-void KOReaderSyncClient::setBaseUrlOverride(const std::string& url) { baseUrlOverride = url; }
-void KOReaderSyncClient::reserveBaseUrlOverride(const size_t capacity) { baseUrlOverride.reserve(capacity); }
-
-void KOReaderSyncClient::clearBaseUrlOverride() { baseUrlOverride.clear(); }
 
 KOReaderSyncClient::Error KOReaderSyncClient::authenticate() {
   lastHttpCode = 0;
@@ -65,7 +55,7 @@ KOReaderSyncClient::Error KOReaderSyncClient::authenticate() {
     return NO_CREDENTIALS;
   }
 
-  const std::string url = effectiveBaseUrl() + "/users/auth";
+  const std::string url = KOREADER_STORE.getBaseUrl() + "/users/auth";
   LOG_DBG("KOSync", "Authenticating: %s (heap: %u)", url.c_str(), (unsigned)ESP.getFreeHeap());
   if (insufficientHeap()) return LOW_MEMORY;
 
@@ -98,7 +88,7 @@ KOReaderSyncClient::Error KOReaderSyncClient::createUser() {
     return NO_CREDENTIALS;
   }
 
-  const std::string url = effectiveBaseUrl() + "/users/create";
+  const std::string url = KOREADER_STORE.getBaseUrl() + "/users/create";
   LOG_DBG("KOSync", "Creating account: %s (heap: %u)", url.c_str(), (unsigned)ESP.getFreeHeap());
   if (insufficientHeap()) return LOW_MEMORY;
 
@@ -136,7 +126,7 @@ KOReaderSyncClient::Error KOReaderSyncClient::getProgress(const std::string& doc
     return NO_CREDENTIALS;
   }
 
-  const std::string url = effectiveBaseUrl() + "/syncs/progress/" + documentHash;
+  const std::string url = KOREADER_STORE.getBaseUrl() + "/syncs/progress/" + documentHash;
   LOG_DBG("KOSync", "Getting progress: %s (heap: %u)", url.c_str(), (unsigned)ESP.getFreeHeap());
   if (insufficientHeap()) return LOW_MEMORY;
 
@@ -167,23 +157,39 @@ KOReaderSyncClient::Error KOReaderSyncClient::getProgress(const std::string& doc
   }
 
   if (httpCode >= 200 && httpCode < 300) {
-    const char* parseError = nullptr;
-    const bool parsed = koreader_sync::parseProgressResponse(
-        http.getString().c_str(), KOREADER_STORE.supportsRichProgress(), outProgress, &parseError);
+    JsonDocument doc;
+    const DeserializationError error = deserializeJson(doc, http.getString().c_str());
     http.end();
 
-    if (!parsed) {
-      LOG_ERR("KOSync", "JSON parse failed: %s", parseError ? parseError : "?");
+    if (error) {
+      LOG_ERR("KOSync", "JSON parse failed: %s", error.c_str());
       return JSON_ERROR;
     }
 
-    if (koreader_sync::isEmptyProgress(outProgress)) return NOT_FOUND;
-
     outProgress.document = documentHash;
-    if (outProgress.position.has_value()) {
-      const auto& rich = *outProgress.position;
-      LOG_DBG("KOSync", "Got rich position: spine=%u page=%u/%u para=%u", rich.spineIndex, rich.pageNumber,
-              rich.totalPages, rich.paragraphIndex.value_or(0));
+    outProgress.progress = doc["progress"].as<std::string>();
+    outProgress.percentage = doc["percentage"].as<float>();
+    outProgress.device = doc["device"].as<std::string>();
+    outProgress.deviceId = doc["device_id"].as<std::string>();
+    outProgress.timestamp = doc["timestamp"].as<int64_t>();
+
+    outProgress.position.reset();
+    if (KOREADER_STORE.supportsRichProgress()) {
+      const JsonObjectConst pos = doc["position"].as<JsonObjectConst>();
+      if (!pos.isNull()) {
+        KOReaderRichPosition rich;
+        rich.pctQ = pos["pctQ"].as<uint32_t>();
+        rich.spineIndex = pos["spine"].as<uint16_t>();
+        rich.pageNumber = pos["page"].as<uint16_t>();
+        const uint16_t pages = pos["pages"].as<uint16_t>();
+        rich.totalPages = pages > 0 ? pages : 1;
+        const uint16_t para = pos["para"].as<uint16_t>();
+        if (para > 0) rich.paragraphIndex = para;
+        rich.xpath = pos["xpath"].as<const char*>() ? pos["xpath"].as<const char*>() : "";
+        LOG_DBG("KOSync", "Got rich position: spine=%u page=%u/%u para=%u", rich.spineIndex, rich.pageNumber,
+                rich.totalPages, para);
+        outProgress.position = std::move(rich);
+      }
     }
 
     LOG_DBG("KOSync", "Got progress: %.2f%% at %s", outProgress.percentage * 100, outProgress.progress.c_str());
@@ -203,7 +209,7 @@ KOReaderSyncClient::Error KOReaderSyncClient::updateProgress(const KOReaderProgr
     return NO_CREDENTIALS;
   }
 
-  const std::string url = effectiveBaseUrl() + "/syncs/progress";
+  const std::string url = KOREADER_STORE.getBaseUrl() + "/syncs/progress";
   LOG_DBG("KOSync", "Updating progress: %s (heap: %u)", url.c_str(), (unsigned)ESP.getFreeHeap());
   if (insufficientHeap()) return LOW_MEMORY;
 
@@ -281,8 +287,6 @@ KOReaderSyncClient::Error KOReaderSyncClient::updateProgress(const KOReaderProgr
   return SERVER_ERROR;
 }
 
-bool KOReaderSyncClient::isOwnRecord(const KOReaderProgress& progress) { return progress.deviceId == DEVICE_ID; }
-
 const char* KOReaderSyncClient::errorString(Error error) {
   switch (error) {
     case OK:
@@ -301,8 +305,6 @@ const char* KOReaderSyncClient::errorString(Error error) {
       return "No progress found";
     case LOW_MEMORY:
       return "Not enough memory for sync — please retry";
-    case TAILNET_ERROR:
-      return "Tailscale connection failed";
     default:
       return "Unknown error";
   }

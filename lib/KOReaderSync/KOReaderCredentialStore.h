@@ -36,12 +36,10 @@ class KOReaderCredentialStore : public PersistableStore<KOReaderCredentialStore>
   std::string username;
   std::string password;
   std::string serverUrl;                                            // Custom sync server URL (empty = default)
-  bool useTailnet = false;                                          // Route custom server through Tailscale
   DocumentMatchMethod matchMethod = DocumentMatchMethod::FILENAME;  // Default to filename for compatibility
   bool sendMetadata = true;                                         // Send document metadata with progress sync
   KOReaderSyncBehavior syncBehavior = KOReaderSyncBehavior::SMART;
   KOReaderServerType serverType = KOReaderServerType::CROSSPOINT;
-  bool syncOnSleep = false;  // Push reader progress on the way into sleep
 
   // Private constructor for singleton
   KOReaderCredentialStore() = default;
@@ -74,8 +72,6 @@ class KOReaderCredentialStore : public PersistableStore<KOReaderCredentialStore>
 
   // Get base URL for API calls (with http:// normalization if no protocol, falls back to default)
   std::string getBaseUrl() const;
-  void setUseTailnet(bool enabled) { useTailnet = enabled; }
-  bool getUseTailnet() const { return useTailnet; }
 
   // Server protocol/capability profile.
   void setServerType(KOReaderServerType type);
@@ -94,9 +90,6 @@ class KOReaderCredentialStore : public PersistableStore<KOReaderCredentialStore>
   // Sync behavior
   void setSyncBehavior(KOReaderSyncBehavior behavior);
   KOReaderSyncBehavior getSyncBehavior() const { return syncBehavior; }
-
-  void setSyncOnSleep(bool enabled) { syncOnSleep = enabled; }
-  bool getSyncOnSleep() const { return syncOnSleep; }
 };
 
 // Helper macro to access credential store

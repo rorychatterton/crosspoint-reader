@@ -145,7 +145,6 @@ void CatalogActivity::beginDownload(const std::string& title) {
   state = State::DOWNLOADING;
   statusMessage = title;
   downloadProgress = downloadTotal = 0;
-  downloadNote[0] = '\0';
   cancelDownload = goHomeAfterCancel = false;
   requestUpdate(true);
 }
@@ -153,7 +152,11 @@ void CatalogActivity::beginDownload(const std::string& title) {
 void CatalogActivity::onDownloadProgress(const size_t downloaded, const size_t total) {
   downloadProgress = downloaded;
   downloadTotal = total;
-  pollDownloadCancel();
+  // Home cancels immediately; other configured actions are deferred to the
+  // next main-loop pass by the transfer input pump.
+  mappedInput.update(true);
+  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) cancelDownload = true;
+  if (mappedInput.wasHomeGesture()) cancelDownload = goHomeAfterCancel = true;
   routeTouch(mappedInput);
   const int percent = total > 0 ? static_cast<int>(static_cast<uint64_t>(downloaded) * 100 / total) : 0;
   const unsigned long now = millis();
@@ -163,14 +166,6 @@ void CatalogActivity::onDownloadProgress(const size_t downloaded, const size_t t
     lastProgressUpdateMs = now;
     requestUpdate(true);
   }
-}
-
-void CatalogActivity::pollDownloadCancel() {
-  // Home cancels immediately; other configured actions are deferred to the
-  // next main-loop pass by the transfer input pump.
-  mappedInput.update(true);
-  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) cancelDownload = true;
-  if (mappedInput.wasHomeGesture()) cancelDownload = goHomeAfterCancel = true;
 }
 
 HttpDownloader::DownloadError CatalogActivity::downloadFile(const std::string& url, const std::string& dest,
@@ -216,7 +211,7 @@ bool CatalogActivity::buildStatusScreen(UiScreen& screen, const bool boldError, 
   switch (state) {
     case State::DOWNLOADING:
       catalogDownloadScreen(screen, statusMessage.c_str(), downloadProgress, showDownloadTotal ? downloadTotal : 0,
-                            ACTION_CANCEL, downloadNote);
+                            ACTION_CANCEL);
       break;
     case State::ERROR:
       if (mappedInput.hasTouch()) {

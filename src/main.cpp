@@ -31,13 +31,9 @@
 #include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
-#include "TailnetSelfTest.h"
-#include "TailscaleStore.h"
 #include "WifiCredentialStore.h"
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
-#include "activities/browser/OpdsBookBrowserActivity.h"
-#include "activities/reader/KOReaderSleepSync.h"
 #include "activities/settings/SdFirmwareUpdateActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -144,19 +140,12 @@ EpdFontFamily ui12FontFamily(&ui12RegularFont, &ui12BoldFont);
 RTC_NOINIT_ATTR uint32_t silentRebootMagic;
 RTC_NOINIT_ATTR uint32_t silentRebootTarget;
 RTC_NOINIT_ATTR uint32_t silentRebootPayload;
-RTC_NOINIT_ATTR uint32_t silentRebootOpdsIndex;    // OPDS server index to resume
-RTC_NOINIT_ATTR uint32_t silentRebootOpdsAttempt;  // loop guard for heap reboots
-RTC_NOINIT_ATTR uint32_t silentRebootOpdsSession;  // OPDS feed cache session id
 constexpr uint32_t SILENT_REBOOT_MAGIC = 0xC1EAB007;
 constexpr uint32_t SILENT_REBOOT_TARGET_HOME = 0;
 constexpr uint32_t SILENT_REBOOT_TARGET_READER = 1;
 constexpr uint32_t SILENT_REBOOT_TARGET_SETTINGS = 2;
 constexpr uint32_t SILENT_REBOOT_TARGET_JOIN_NETWORK = 3;
-constexpr uint32_t SILENT_REBOOT_TARGET_OPDS = 4;
-constexpr uint32_t SILENT_REBOOT_TARGET_READER_KOSYNC = 5;
-constexpr uint32_t SILENT_REBOOT_TARGET_KOREADER_AUTH = 6;
-constexpr uint32_t SILENT_REBOOT_TARGET_KOREADER_SIGN_UP = 7;
-constexpr uint32_t SILENT_REBOOT_TARGET_MAX = SILENT_REBOOT_TARGET_KOREADER_SIGN_UP;
+constexpr uint32_t SILENT_REBOOT_TARGET_MAX = SILENT_REBOOT_TARGET_JOIN_NETWORK;
 constexpr uint32_t SILENT_REBOOT_LIGHT_ON = 1U << 0;
 
 // How the device is coming back to life, resolved once at boot. Both resume
@@ -189,9 +178,8 @@ static void armSilentReboot(const uint32_t target) {
 }
 
 // Returns instead of rebooting when sleep supersedes the reboot; callers keep
-// running in that case. paint=false when the framebuffer has been released to
-// the heap (nothing can draw the popup).
-static void silentRestartTo(const uint32_t target, const char* targetName, const bool paint) {
+// running in that case.
+static void silentRestartTo(const uint32_t target, const char* targetName) {
   if (deepSleepInProgress) return;  // sleeping supersedes the heap-defrag reboot
   armSilentReboot(target);
   LOG_DBG("MAIN", "Silent restart (target=%s)", targetName);
@@ -200,58 +188,16 @@ static void silentRestartTo(const uint32_t target, const char* targetName, const
   // through to the new activity. On Home, Select on the default
   // selectorIndex=0 opens the most-recent book, looking like a trampoline back
   // to the reader they just exited.
-  if (paint) {
-    GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
-    delay(50);
-  }
+  GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+  delay(50);
   ESP.restart();
 }
 
-void silentRestart(bool paint) { silentRestartTo(SILENT_REBOOT_TARGET_HOME, "home", paint); }
+void silentRestart() { silentRestartTo(SILENT_REBOOT_TARGET_HOME, "home"); }
 
-void silentRestartToReader(bool paint) { silentRestartTo(SILENT_REBOOT_TARGET_READER, "reader", paint); }
+void silentRestartToReader() { silentRestartTo(SILENT_REBOOT_TARGET_READER, "reader"); }
 
-void silentRestartToSettings(bool paint) { silentRestartTo(SILENT_REBOOT_TARGET_SETTINGS, "settings", paint); }
-
-// Set at boot by a READER_KOSYNC reboot; the reader consumes it once.
-static bool koSyncResumePending = false;
-
-void silentRestartToReaderSync(bool paint) {
-  silentRestartTo(SILENT_REBOOT_TARGET_READER_KOSYNC, "reader-kosync", paint);
-}
-
-bool consumeKoSyncResume() {
-  const bool pending = koSyncResumePending;
-  koSyncResumePending = false;
-  return pending;
-}
-
-void silentRestartToKOReaderAuth(const bool signUp, bool paint) {
-  silentRestartTo(signUp ? SILENT_REBOOT_TARGET_KOREADER_SIGN_UP : SILENT_REBOOT_TARGET_KOREADER_AUTH, "koreader-auth",
-                  paint);
-}
-
-// Reboot into a clean heap and resume the tailnet OPDS browse from the feed
-// spooled on the SD card. paint=false when the framebuffer has been released
-// to the heap: nothing can draw the popup.
-void silentRestartToOpds(uint32_t serverIndex, bool paint) {
-  if (deepSleepInProgress) return;  // sleeping supersedes the heap-defrag reboot
-  silentRebootOpdsIndex = serverIndex;
-  silentRebootOpdsAttempt = silentRebootOpdsAttempt + 1;
-  armSilentReboot(SILENT_REBOOT_TARGET_OPDS);
-  LOG_DBG("MAIN", "Silent restart (target=opds idx=%u attempt=%u)", (unsigned)serverIndex,
-          (unsigned)silentRebootOpdsAttempt);
-  if (paint) {
-    GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
-    delay(50);
-  }
-  ESP.restart();
-}
-
-uint32_t tailnetRebootAttemptCount() { return silentRebootOpdsAttempt; }
-void clearTailnetRebootAttempt() { silentRebootOpdsAttempt = 0; }
-uint32_t opdsBrowseSessionId() { return silentRebootOpdsSession; }
-void setOpdsBrowseSessionId(uint32_t id) { silentRebootOpdsSession = id; }
+void silentRestartToSettings() { silentRestartTo(SILENT_REBOOT_TARGET_SETTINGS, "settings"); }
 
 void silentRestartToJoinNetwork() {
   if (deepSleepInProgress) return;
@@ -331,27 +277,6 @@ static bool loadSleepFrameBuffer() {
   return true;
 }
 
-// Joins the last-used network for sleep-time delivery. Gives up early when the
-// network is out of range or rejects the password.
-static bool joinLastWifiForSleep() {
-  const auto cred = WIFI_STORE.findCredential(WIFI_STORE.getLastConnectedSsid());
-  if (!cred) return false;
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(cred->ssid.c_str(), cred->password.c_str());
-  const unsigned long joinDeadline = millis() + 10000;
-  while (millis() < joinDeadline) {
-    const wl_status_t status = WiFi.status();
-    if (status == WL_CONNECTED) {
-      trustedtime::startSync();  // snap the clock floor while the network is up
-      return true;
-    }
-    if (status == WL_NO_SSID_AVAIL || status == WL_CONNECT_FAILED) break;
-    delay(100);
-  }
-  LOG_DBG("MAIN", "Sleep WiFi join failed (status %d)", static_cast<int>(WiFi.status()));
-  return false;
-}
-
 // Plugin-event delivery on the way into deep sleep. sleep.enter is delivered
 // now — over the live connection, or by bringing WiFi up when a plugin
 // subscribes (e.g. fetching a fresh /sleep.bmp so THIS sleep shows it — the
@@ -390,25 +315,22 @@ static void deliverSleepPluginEvents() {
   // same sleep, and a progress-sync plugin usually subscribes to it alone.
   if (!pluginevents::wantsConnectAny()) return;
   if (powerManager.getBatteryPercentage() < 20) return;
-  if (!WIFI_STORE.findCredential(WIFI_STORE.getLastConnectedSsid())) return;
+  const auto cred = WIFI_STORE.findCredential(WIFI_STORE.getLastConnectedSsid());
+  if (!cred) return;
 
   GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
-  if (joinLastWifiForSleep()) {
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(cred->ssid.c_str(), cred->password.c_str());
+  const unsigned long joinDeadline = millis() + 10000;
+  while (WiFi.status() != WL_CONNECTED && millis() < joinDeadline) {
+    delay(100);
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    trustedtime::startSync();  // snap the clock floor while the network is up
     pluginevents::drain(&renderer);
   } else {
-    LOG_DBG("MAIN", "Sleep-event WiFi join failed; deferring delivery");
+    LOG_DBG("MAIN", "Sleep-event WiFi join timed out; deferring delivery");
   }
-}
-
-// Sync Progress on Sleep: pushes the book the reader captured in
-// prepareForSleep(), behind the sleep screen. Skipped on low battery, out of
-// range of the last network, or when the position has not moved since the
-// last push, so an idle wake/sleep cycle never turns the radio on.
-static void pushSleepProgress() {
-  if (!kosync_sleep::pending()) return;
-  if (powerManager.getBatteryPercentage() < 20) return;
-  if (WiFi.status() != WL_CONNECTED && !joinLastWifiForSleep()) return;
-  kosync_sleep::push(renderer);
 }
 
 // Enter deep sleep mode
@@ -443,9 +365,6 @@ void enterDeepSleep(bool fromTimeout = false) {
     // A stale Quick Resume frame must not replace the selected sleep screen during wake.
     Storage.remove(SLEEP_FRAME_FILE);
   }
-
-  // After the Quick Resume save: the push lends the framebuffer.
-  pushSleepProgress();
 
   // Tear down WiFi so the modem power domain isn't held alive across deep sleep.
   // Wake from deep sleep is effectively a chip reset, so no state needs to survive.
@@ -537,9 +456,6 @@ void setup() {
   silentRebootMagic = 0;
   silentRebootTarget = 0;
   silentRebootPayload = 0;
-  // The tailnet heap-reboot loop guard is reset unless this boot resumes the
-  // OPDS browse, which must keep the count so it cannot reboot again.
-  if (snapshotTarget != SILENT_REBOOT_TARGET_OPDS) silentRebootOpdsAttempt = 0;
 
   gpio.begin();
   powerManager.begin();
@@ -602,10 +518,6 @@ void setup() {
   I18N.setLanguage(static_cast<Language>(SETTINGS.language));
   KOREADER_STORE.loadFromFile();
   OPDS_STORE.loadFromFile();
-  TAILSCALE_STORE.loadFromFile();
-#ifdef CROSSPOINT_TAILNET_SELFTEST
-  runTailnetSelfTest();  // headless; never returns (reboots to retry)
-#endif
   UITheme::getInstance().reload();
   ButtonNavigator::setMappedInputManager(mappedInputManager);
   pluginevents::refreshSubscriptions();
@@ -711,10 +623,8 @@ void setup() {
   } else if (rebootedFromPanic) {
     // If we rebooted from a panic, go to crash report screen to show the panic info
     activityManager.goToCrashReport();
-  } else if (resume == BootResume::Silent &&
-             (snapshotTarget == SILENT_REBOOT_TARGET_READER || snapshotTarget == SILENT_REBOOT_TARGET_READER_KOSYNC) &&
+  } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_READER &&
              !APP_STATE.openEpubPath.empty()) {
-    koSyncResumePending = snapshotTarget == SILENT_REBOOT_TARGET_READER_KOSYNC;
     activityManager.goToReader(APP_STATE.openEpubPath);
   } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_JOIN_NETWORK) {
     // Rebooted on the way *into* File Transfer > Join Network for a fresh heap;
@@ -723,14 +633,6 @@ void setup() {
   } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_SETTINGS) {
     // Back out of the WiFi rows and the user is where they left off, not on Home.
     activityManager.goToSettings();
-  } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_OPDS) {
-    // Resumed after a low-heap reboot: reopen the tailnet OPDS browse with a
-    // clean heap so the concurrent DERP + HTTPS path fits.
-    activityManager.goToBrowserServer(silentRebootOpdsIndex);
-  } else if (resume == BootResume::Silent && (snapshotTarget == SILENT_REBOOT_TARGET_KOREADER_AUTH ||
-                                              snapshotTarget == SILENT_REBOOT_TARGET_KOREADER_SIGN_UP)) {
-    // Rebooted out of a tailnet auth request for a fresh heap; repeat it.
-    activityManager.goToKOReaderAuth(snapshotTarget == SILENT_REBOOT_TARGET_KOREADER_SIGN_UP);
   } else if (resume == BootResume::Silent) {
     // target == home (or reader with no open book): land on home — don't fall
     // through to the sleep-wake "resume reader" logic, which fires on stale
@@ -820,14 +722,9 @@ void loop() {
 
   // Handle incoming serial commands,
   // nb: we use logSerial from logging to avoid deprecation warnings
-  // A test-driver command counts as user activity: WiFi started at the
-  // low-power clock hangs, and a button press would have restored it first.
-  bool serialCommand = false;
   if (logSerial.available() > 0) {
     String line = logSerial.readStringUntil('\n');
     if (line.startsWith("CMD:")) {
-      serialCommand = true;
-      powerManager.setPowerSaving(false);
       String cmd = line.substring(4);
       cmd.trim();
       if (cmd == "SCREENSHOT") {
@@ -836,47 +733,14 @@ void loop() {
         uint8_t* buf = display.getFrameBuffer();
         logSerial.write(buf, bufferSize);
         logSerial.printf("SCREENSHOT_END\n");
-      } else if (cmd == "REBOOT") {
-        // Headless test driver: restart into a plain boot (no silent-resume flags).
-        logSerial.printf("REBOOT_ACK\n");
-        delay(50);
-        ESP.restart();
-      } else if (cmd.startsWith("OPDS_OPEN ")) {
-        // Headless test driver: Confirm on row N of the OPDS browser, if it is
-        // on screen and browsing (ACK:1), else ACK:0.
-        auto* browser = OpdsBookBrowserActivity::instance();
-        const int row = cmd.substring(10).toInt();
-        logSerial.printf("OPDS_OPEN_ACK:%d\n", browser && browser->injectOpenRow(row) ? 1 : 0);
-      } else if (cmd == "OPDS_BACK") {
-        auto* browser = OpdsBookBrowserActivity::instance();
-        logSerial.printf("OPDS_BACK_ACK:%d\n", browser && browser->injectBack() ? 1 : 0);
-      } else if (cmd == "FILE_TRANSFER") {
-        // Headless test driver: start File Transfer on a saved network so
-        // settings can be set through the web API.
-        logSerial.printf("FILE_TRANSFER_ACK\n");
-        activityManager.goToJoinNetwork();
-      } else if (cmd.startsWith("OPDS_SERVER ")) {
-        // Headless test driver: open the OPDS browser on server N.
-        logSerial.printf("OPDS_SERVER_ACK\n");
-        activityManager.goToBrowserServer(static_cast<size_t>(cmd.substring(12).toInt()));
-      } else if (cmd.startsWith("OPEN ")) {
-        // Headless test driver: open a book by SD path.
-        const String path = cmd.substring(5);
-        logSerial.printf("OPEN_ACK:%d\n", Storage.exists(path.c_str()) ? 1 : 0);
-        if (Storage.exists(path.c_str())) activityManager.goToReader(path.c_str());
-      } else if (cmd == "KOSYNC") {
-        // Headless test driver: the open book starts a KOReader sync once its
-        // page has rendered (the same path a READER_KOSYNC reboot takes).
-        koSyncResumePending = true;
-        logSerial.printf("KOSYNC_ACK\n");
       }
     }
   }
 
   // Check for any user activity (button press or release) or active background work
   static unsigned long lastActivityTime = millis();
-  if (serialCommand || gpio.wasAnyPressed() || gpio.wasAnyReleased() || gpio.wasTouchActivity() ||
-      halTiltSensor.hadActivity() || activityManager.preventAutoSleep()) {
+  if (gpio.wasAnyPressed() || gpio.wasAnyReleased() || gpio.wasTouchActivity() || halTiltSensor.hadActivity() ||
+      activityManager.preventAutoSleep()) {
     lastActivityTime = millis();         // Reset inactivity timer
     powerManager.setPowerSaving(false);  // Restore normal CPU frequency on user activity
   }

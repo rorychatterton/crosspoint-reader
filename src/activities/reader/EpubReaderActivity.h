@@ -229,7 +229,6 @@ class EpubReaderActivity final : public ReaderActivity {
   void onReturnFromEndOfBook() override;
 
   bool skipLoopDelay() override;
-  void prepareForSleep() override;
 
   ScreenshotInfo getScreenshotInfo() const override;
   CrossPointPosition getCurrentPosition() const;

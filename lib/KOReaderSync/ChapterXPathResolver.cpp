@@ -1,7 +1,6 @@
 #include "ChapterXPathResolver.h"
 
 #include <Epub/VisibleTextUtils.h>
-#include <Epub/parsers/HtmlVoidElementFixer.h>
 #include <Logging.h>
 #include <Print.h>
 #include <Utf8.h>
@@ -16,33 +15,6 @@
 #include <vector>
 
 namespace {
-
-// Chapters reach expat through HtmlVoidElementFixer, as in ChapterHtmlSlimParser,
-// so every chapter the reader can index also resolves here.
-XML_Status parseFixed(XML_Parser parser, HtmlVoidElementFixer& fixer, const uint8_t* data, size_t size) {
-  constexpr size_t CHUNK = 128;
-  char out[CHUNK + HtmlVoidElementFixer::growthFor(CHUNK)];
-  while (size > 0) {
-    const size_t n = std::min(size, CHUNK);
-    const size_t len = fixer.feed(reinterpret_cast<const char*>(data), n, out);
-    data += n;
-    size -= n;
-    if (len == 0) continue;
-    const XML_Status status = XML_Parse(parser, out, static_cast<int>(len), XML_FALSE);
-    if (status != XML_STATUS_OK) return status;
-  }
-  return XML_STATUS_OK;
-}
-
-XML_Status finishFixed(XML_Parser parser, HtmlVoidElementFixer& fixer) {
-  char out[HtmlVoidElementFixer::MAX_HELD];
-  const size_t len = fixer.finish(out);
-  if (len > 0) {
-    const XML_Status status = XML_Parse(parser, out, static_cast<int>(len), XML_FALSE);
-    if (status != XML_STATUS_OK) return status;
-  }
-  return XML_Parse(parser, "", 0, XML_TRUE);
-}
 std::string stripPrefix(const XML_Char* name) {
   if (!name) {
     return "";
@@ -129,7 +101,7 @@ class ParagraphTextCounter final : public Print {
       return parseOk;
     }
 
-    if (finishFixed(parser, fixer) == XML_STATUS_ERROR) {
+    if (XML_Parse(parser, "", 0, XML_TRUE) == XML_STATUS_ERROR) {
       LOG_ERR("KOX", "Final XML parse error: %s", XML_ErrorString(XML_GetErrorCode(parser)));
       parseOk = false;
     }
@@ -143,7 +115,7 @@ class ParagraphTextCounter final : public Print {
       return size;
     }
 
-    if (parseFixed(parser, fixer, buffer, size) != XML_STATUS_OK) {
+    if (XML_Parse(parser, reinterpret_cast<const char*>(buffer), static_cast<int>(size), XML_FALSE) != XML_STATUS_OK) {
       const enum XML_Error error = XML_GetErrorCode(parser);
       if (error != XML_ERROR_ABORTED) {
         LOG_ERR("KOX", "XML parse error: %s", XML_ErrorString(error));
@@ -225,7 +197,6 @@ class ParagraphTextCounter final : public Print {
 
  private:
   XML_Parser parser = nullptr;
-  HtmlVoidElementFixer fixer;
   bool parseOk = true;
   bool insideBody = false;
   bool stopped = false;
@@ -258,7 +229,7 @@ class XPathParagraphResolver final : public Print {
       return parseOk;
     }
 
-    if (finishFixed(parser, fixer) == XML_STATUS_ERROR) {
+    if (XML_Parse(parser, "", 0, XML_TRUE) == XML_STATUS_ERROR) {
       LOG_ERR("KOX", "Final XML parse error: %s", XML_ErrorString(XML_GetErrorCode(parser)));
       parseOk = false;
     }
@@ -275,7 +246,7 @@ class XPathParagraphResolver final : public Print {
       return size;
     }
 
-    if (parseFixed(parser, fixer, buffer, size) != XML_STATUS_OK) {
+    if (XML_Parse(parser, reinterpret_cast<const char*>(buffer), static_cast<int>(size), XML_FALSE) != XML_STATUS_OK) {
       const enum XML_Error error = XML_GetErrorCode(parser);
       if (error != XML_ERROR_ABORTED) {
         LOG_ERR("KOX", "XML parse error: %s", XML_ErrorString(error));
@@ -357,7 +328,6 @@ class XPathParagraphResolver final : public Print {
   }
 
   XML_Parser parser = nullptr;
-  HtmlVoidElementFixer fixer;
   const int targetParagraph;
   bool parseOk = true;
   bool insideBody = false;
@@ -401,7 +371,7 @@ class XPathProgressResolver final : public Print {
       return parseOk;
     }
 
-    if (finishFixed(parser, fixer) == XML_STATUS_ERROR) {
+    if (XML_Parse(parser, "", 0, XML_TRUE) == XML_STATUS_ERROR) {
       LOG_ERR("KOX", "Final XML parse error: %s", XML_ErrorString(XML_GetErrorCode(parser)));
       parseOk = false;
     }
@@ -418,7 +388,7 @@ class XPathProgressResolver final : public Print {
       return size;
     }
 
-    if (parseFixed(parser, fixer, buffer, size) != XML_STATUS_OK) {
+    if (XML_Parse(parser, reinterpret_cast<const char*>(buffer), static_cast<int>(size), XML_FALSE) != XML_STATUS_OK) {
       const enum XML_Error error = XML_GetErrorCode(parser);
       if (error != XML_ERROR_ABORTED) {
         LOG_ERR("KOX", "XML parse error: %s", XML_ErrorString(error));
@@ -587,7 +557,6 @@ class XPathProgressResolver final : public Print {
   }
 
   XML_Parser parser = nullptr;
-  HtmlVoidElementFixer fixer;
   const size_t targetVisibleChar;
   const BoundaryMode boundaryMode;
   bool parseOk = true;
